@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Operations Management System</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="auth-wrap">
+        <div class="brand">
+          <span class="brand-mark">📋</span>
+          <div>
+            <strong>Associate Desk</strong>
+            <small>Secure access</small>
+          </div>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Authentication">
+          <button class="auth-tab active" id="showLoginBtn" type="button">Login</button>
+          <button class="auth-tab" id="showSignupBtn" type="button">Signup</button>
+        </div>
+        <form class="login-card" id="loginForm">
+          <label>Email<input id="loginEmail" type="email" autocomplete="username" required value="admin@yourdomain.com" /></label>
+          <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required value="admin123" /></label>
+          <button class="primary-btn" type="submit">Login</button>
+        </form>
+        <form class="login-card hidden" id="signupForm">
+          <label>Name<input id="signupName" type="text" autocomplete="name" required placeholder="Your name" /></label>
+          <label>Email<input id="signupEmail" type="email" autocomplete="username" required placeholder="you@yourdomain.com" /></label>
+          <label>Password<input id="signupPassword" type="password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters" /></label>
+          <button class="primary-btn" type="submit">Create account</button>
+        </form>
+      </div>
+    </section>
+
+    <div class="app-shell locked" id="appShell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">📋</span>
+          <div>
+            <strong style="color: white; font-weight: 700; font-size:x-large;">Associate Desk</strong>
+            <small style="text-align: center; padding-bottom: 0.3cm;">Operations center</small>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Main navigation">
+          <button class="nav-btn active" data-view="dashboard"><span>🏠</span><span class="nav-label">Dashboard</span></button>
+          <button class="nav-btn" data-view="operations" type="button"><span>⚙️</span><span class="nav-label">Operations</span></button>
+          <button class="nav-btn" data-view="freelancers" type="button"><span>👥</span><span class="nav-label">Freelancers</span></button>
+          <button class="nav-btn" data-view="tasks" type="button"><span>📋</span><span class="nav-label">Assignments</span></button>
+          <button class="nav-btn" data-view="payments" type="button"><span>💰</span><span class="nav-label">Payments</span></button>
+          <button class="nav-btn" data-view="notifications" type="button"><span>🔔</span><span class="nav-label">Notifications</span></button>
+        </nav>
+        <div class="sidebar-note">
+          <span>Tip</span>
+          <p>Assigning a task creates a notification and opens a ready-to-send email draft.</p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header>
+          <div>
+            <h1>Operations Management System</h1>
+            <p>Track people, tasks, workflow, payment status, and assignment messages in one place.</p>
+          </div>
+          <div class="top-actions">
+            <button class="ghost-btn" id="installBtn" hidden> Install App</button>
+            <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
+            <button class="primary-btn" id="openTaskModalBtn" type="button">+ Assign task</button>
+            <button class="ghost-btn" id="exportDataBtn"> Export Data</button>
+            <button class="ghost-btn" id="importDataBtn"> Import Data</button>
+            <input type="file" id="importFile" accept=".json" hidden>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard-view" aria-labelledby="dashboard-heading">
+          <div class="section-head">
+            <h2 id="dashboard-heading">Overview</h2>
+            <div class="search-wrap">
+              <input id="globalSearch" type="search" placeholder="Search freelancers or tasks" />
+            </div>
+          </div>
+          <div class="metrics" id="metrics"></div>
+          <div class="dashboard-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <h3>Workflow</h3>
+                <button class="link-btn" data-jump="tasks" type="button">Manage tasks</button>
+              </div>
+              <div class="workflow-columns" id="workflowPreview"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h3>Recent notifications</h3>
+                <button class="link-btn" data-jump="notifications" type="button">View all</button>
+              </div>
+              <div class="list" id="recentNotifications"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view"
+         id="operations-view">
+
+  <div class="section-head">
+    <h2 style="font-size:xx-large;">
+      Operations
+    </h2>
+
+    <button class="primary-btn"
+            id="openOperationModalBtn"
+            type="button">
+      + Add Operation
+    </button>
+  </div>
+
+  <div id="operationsGrid">
+  </div>
+
+</section>
+
+        <section class="view" id="freelancers-view" aria-labelledby="freelancers-heading">
+         <div class="section-head">
+            <h2 id="freelancers-heading" style="font-size: xx-large;">Freelancer Details</h2>
+
+             <div class="filters">
+             <input id="freelancerSearch"
+                  type="search"
+                  placeholder="Search freelancer">
+
+             <select id="stateFilter">
+                  <option value="all">All States</option>
+             </select>
+
+             <select id="districtFilter">
+             <option value="all">All Districts</option>
+              </select>
+
+    <select id="languageFilter">
+      <option value="all">All Languages</option>
+    </select>
+
+    <select id="statusFilter">
+      <option value="all">All Status</option>
+      <option value="Available">Available</option>
+      <option value="Busy">Busy</option>
+      <option value="Inactive">Inactive</option>
+    </select>
+
+    <button class="primary-btn"
+            id="openFreelancerModalBtn"
+            type="button">
+      + Add freelancer
+    </button>
+  </div>
+</div>
+<div class="freelancer-grid" id="freelancerGrid"></div>
+        </section>
+
+        <section class="view" id="tasks-view" aria-labelledby="tasks-heading">
+          <div class="section-head">
+            <h2 id="tasks-heading" style="font-size:xx-large;">Task Workflow</h2>
+            <div class="filters">
+              <select id="taskFreelancerFilter" aria-label="Filter by freelancer"></select>
+              <select id="taskTypeFilter" aria-label="Filter by task type"></select>
+              <select id="taskStatusFilter" aria-label="Filter by status">
+                <option value="all">All statuses</option>
+                <option value="Briefed">Briefed</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Review">Review</option>
+                <option value="Completed">Completed</option>
+              </select>
+            </div>
+          </div>
+          <div class="kanban" id="taskBoard"></div>
+        </section>
+
+        <section class="view" id="payments-view" aria-labelledby="payments-heading">
+          <div class="section-head">
+            <h2 id="payments-heading">Payment Per Task</h2>
+            <button class="ghost-btn" id="markPaidBtn" type="button">Mark selected paid</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th><input id="selectAllPayments" type="checkbox" aria-label="Select all payment rows" /></th>
+                  <th>Task Type</th>
+                  <th>Batch Name</th>
+                  <th>Freelancer</th>
+                  <th>Count</th>
+                  <th>Pay / task</th>
+                  <th>Total Amount</th>
+                  <th>Start</th>
+                  <th>Deadline</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="paymentRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="view" id="notifications-view" aria-labelledby="notifications-heading">
+          <div class="section-head">
+            <h2 id="notifications-heading">Notifications & Emails</h2>
+            <button class="ghost-btn" id="clearNotificationsBtn" type="button">Clear read</button>
+          </div>
+          <div class="notification-layout">
+            <section class="panel">
+              <h3>Notification center</h3>
+              <div class="list" id="notificationList"></div>
+            </section>
+            <section class="panel">
+              <h3>Domain email settings</h3>
+              <div class="template-box">
+                <label for="senderName">Sender name</label>
+                <input id="senderName" type="text" />
+                <label for="senderEmail">Domain email</label>
+                <input id="senderEmail" type="email" placeholder="tasks@yourdomain.com" />
+                <label for="emailSubject">Subject</label>
+                <input id="emailSubject" type="text" />
+                <label for="emailBody">Body</label>
+                <textarea id="emailBody" rows="10"></textarea>
+                <button class="primary-btn" id="saveTemplateBtn" type="button">Save email settings</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="operationModal">
+
+<form class="modal-form"
+      id="operationForm">
+
+<div class="modal-head">
+<h2>Add Operation</h2>
+</div>
+
+<div class="form-grid">
+
+<input type="hidden"
+       name="id"
+       id="operationId">
+
+<label>
+Batch Name
+<input name="batchName"
+       required>
+</label>
+
+<label>
+Task Type
+<select name="taskType" required>
+  <option>Transcription QC</option>
+  <option>Audio QC</option>
+  <option>Annotation</option>
+  <option>Speech Recording</option>
+  <option>Image QC</option>
+  <option>Others</option>
+</select>
+</label>
+
+<label>
+Language
+<input name="language"
+       required>
+</label>
+
+<label>
+Volume
+<input name="volume"
+       required>
+</label>
+
+<label>
+Start Date
+<input type="date"
+       name="startDate"
+       required>
+</label>
+
+<label>
+Deadline
+<input type="date"
+       name="deadlineDate"
+       required>
+</label>
+
+<label>
+Status
+<select name="status">
+
+<option>Received</option>
+<option>Ongoing</option>
+<option>QC</option>
+<option>Submitted</option>
+<option>Completed</option>
+<option>On Hold</option>
+
+</select>
+</label>
+
+<label>
+Source / Client
+<input
+  name="source"
+  placeholder="ARTPARK">
+</label>
+
+<label class="full">
+Comments
+<textarea name="comments"></textarea>
+</label>
+
+</div>
+
+<menu>
+<button type="button"
+        class="ghost-btn"
+        onclick="this.closest('dialog').close()">
+Cancel
+</button>
+
+<button type="submit"
+        class="primary-btn">
+Save Operation
+</button>
+</menu>
+
+</form>
+
+</dialog>
+
+    <dialog id="freelancerModal">
+      <form method="dialog" class="modal-form" id="freelancerForm">
+        <div class="modal-head">
+          <h2>Add freelancer</h2>
+          <button class="icon-btn" type="button"
+            onclick="this.closest('dialog').close()">
+            ×
+          </button>
+        </div>
+        <div class="form-grid">
+          <input type="hidden" name="id" id="freelancerId">
+          <label>Name<input name="name" required placeholder="Aarav Mehta" /></label>
+          <label>Email<input name="email" required type="email" placeholder="aarav@example.com" /></label>
+          <label>Mobile<input name="mobile" required placeholder="1234567890" /></label>
+          <label>Role<input name="role" required placeholder="UI Designer" /></label>
+          <label>State<input name="state" required placeholder="Maharashtra" /></label>
+          <label>District<input name="district" required placeholder="Pune" /></label>
+          <label>Language<input name="language" required placeholder="Marathi, Hindi" /></label>
+          <label>Rate<input name="rate" required placeholder="₹2/task" /></label>
+          <label>Status
+            <select name="status">
+              <option>Available</option>
+              <option>Busy</option>
+              <option>Inactive</option>
+            </select>
+          </label>
+        </div>
+        <menu>
+          <button class="ghost-btn" type="button"
+                onclick="this.closest('dialog').close()">
+            Cancel
+          </button>
+          <button class="primary-btn" id="saveFreelancerBtn" value="default" type="submit">Save freelancer</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="taskModal">
+      <form method="dialog" class="modal-form" id="taskForm">
+        <div class="modal-head">
+          <h2>Assign new task</h2>
+          <button class="icon-btn" type="button"
+            onclick="this.closest('dialog').close()">
+            ×
+          </button>
+        </div>
+        <div class="form-grid">
+            <input type="hidden" name="id" id="taskId">
+            <label>
+Batch Name
+
+<select
+  name="operationId"
+  id="operationSelect"
+  required>
+</select>
+
+</label>
+          <label>Task type
+            <select name="taskType" required>
+              <option>Transcription QC</option>
+              <option>Audio QC</option>
+              <option>Annotation</option>
+              <option>Speech Recording</option>
+              <option>Image QC</option>
+              <option>Others</option>
+            </select>
+          </label>
+          <label>Freelancer<select name="freelancerId" id="taskFreelancerSelect" required></select></label>
+          <label>Start date<input name="startDate" required type="date" /></label>
+          <label>Deadline date<input name="deadlineDate" required type="date" /></label>
+          <label>Assigned Volume<input name="taskCount" required type="number" min="1" step="1" placeholder="100" /></label>
+          <label class="full">Description / brief<textarea name="brief" required rows="4" placeholder="Describe deliverables, links, expectations, handoff details, or the custom task name if you selected Others."></textarea></label>
+        </div>
+
+        <menu>
+          <button class="ghost-btn" type="button"
+                onclick="this.closest('dialog').close()">
+            Cancel
+          </button>
+          <button class="primary-btn" value="default" type="submit">Assign and email</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
