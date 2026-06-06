@@ -134,7 +134,7 @@ document.getElementById("loginForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const email = document.getElementById("loginEmail").value.trim().toLowerCase();
   const password = document.getElementById("loginPassword").value;
-  const user = state.users.find((item) => item.email.toLowerCase() === email && item.password === password);
+  const { error } =await supabaseClient.auth.signInWithPassword({email,password});
   if (user) {
     sessionStorage.setItem(SESSION_KEY, user.id);
     updateAuthView();
@@ -144,22 +144,37 @@ document.getElementById("loginForm").addEventListener("submit", (event) => {
   toast("Invalid login details.");
 });
 
-document.getElementById("signupForm").addEventListener("submit", (event) => {
+document.getElementById("signupForm")
+.addEventListener("submit", async (event) => {
+
   event.preventDefault();
-  const name = document.getElementById("signupName").value.trim();
-  const email = document.getElementById("signupEmail").value.trim().toLowerCase();
-  const password = document.getElementById("signupPassword").value;
-  if (state.users.some((user) => user.email.toLowerCase() === email)) {
-    toast("This email already has an account.");
+
+  const name =
+    document.getElementById("signupName").value.trim();
+
+  const email =
+    document.getElementById("signupEmail").value.trim();
+
+  const password =
+    document.getElementById("signupPassword").value;
+
+  const { data, error } =
+    await supabaseClient.auth.signUp({
+      email,
+      password
+    });
+
+  if (error) {
+
+    toast(error.message);
     return;
+
   }
-  const user = { id: uid("user"), name, email, password };
-  state.users.push(user);
-  saveState();
-  sessionStorage.setItem(SESSION_KEY, user.id);
-  event.currentTarget.reset();
-  updateAuthView();
-  toast(`Account created for ${name}.`);
+
+  toast(
+    "Account created. Check email."
+  );
+
 });
 
 document.getElementById("logoutBtn").addEventListener("click", () => {
