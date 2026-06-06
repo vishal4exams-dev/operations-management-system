@@ -1,3 +1,29 @@
+const SUPABASE_URL =
+  "https://ddrimxgqytfprphhazgb.supabase.co";
+
+const SUPABASE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkcmlteGdxeXRmcHJwaGhhemdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjE2NzAsImV4cCI6MjA5NjMzNzY3MH0.ycOW16LmqGZny6cTBgQg4lQ_XKQXtBu6sXsFDRnHsFo";
+
+const supabaseClient =
+  supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_KEY
+  );
+
+  async function testSupabase() {
+
+  const { data, error } =
+    await supabaseClient
+      .from("operations")
+      .select("*");
+
+  console.log(data);
+  console.log(error);
+
+}
+
+testSupabase();
+
 const STORAGE_KEY = "freelancer-management-system-v1";
 const SESSION_KEY = "freelancer-management-session-v1";
 
@@ -1311,3 +1337,43 @@ function importData(file) {
   reader.readAsText(file);
 
 }
+
+document
+.getElementById("forgotPasswordBtn")
+?.addEventListener("click", async () => {
+
+  const email =
+    document
+      .getElementById("loginEmail")
+      .value
+      .trim();
+
+  if (!email) {
+
+    toast("Enter email first.");
+    return;
+
+  }
+
+  const { error } =
+    await supabaseClient.auth.resetPasswordForEmail(
+      email,
+      {
+        redirectTo:
+          window.location.origin
+      }
+    );
+
+  if (error) {
+
+    toast(error.message);
+
+  } else {
+
+    toast(
+      "Password reset email sent."
+    );
+
+  }
+
+});

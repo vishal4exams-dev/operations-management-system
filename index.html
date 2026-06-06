@@ -26,6 +26,7 @@
           <label>Email<input id="loginEmail" type="email" autocomplete="username" required value="admin@yourdomain.com" /></label>
           <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required value="admin123" /></label>
           <button class="primary-btn" type="submit">Login</button>
+          <button type="button" class="link-btn" id="forgotPasswordBtn"> Forgot Password?</button>
         </form>
         <form class="login-card hidden" id="signupForm">
           <label>Name<input id="signupName" type="text" autocomplete="name" required placeholder="Your name" /></label>
@@ -422,6 +423,7 @@ Batch Name
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
   </body>
 </html>
