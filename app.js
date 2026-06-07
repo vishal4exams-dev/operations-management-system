@@ -42,8 +42,6 @@ const SESSION_KEY = "freelancer-management-session-v1";
 
 }
 
-testSupabase();
-
 const statuses = ["Briefed", "In Progress", "Review", "Rework", "Completed"];
 const taskTypes = ["Transcription QC", "Audio QC", "Annotation", "Speech Recording", "Image QC", "Others"];
 
@@ -168,9 +166,9 @@ console.log("LOGIN ERROR", error);
 
   }
 
- sessionStorage.setItem(
+sessionStorage.setItem(
   SESSION_KEY,
-  "logged-in"
+  data.user.id
 );
 
 document
@@ -527,28 +525,22 @@ function updateAuthView() {
       SESSION_KEY
     );
 
-  if (hasSession) {
+  document
+    .getElementById("appShell")
+    .classList.toggle(
+      "locked",
+      !hasSession
+    );
 
-    document
-      .getElementById("loginScreen")
-      .style.display = "none";
+  document
+    .getElementById("loginScreen")
+    .style.display =
+      hasSession ? "none" : "grid";
 
-    document
-      .getElementById("appShell")
-      .style.display = "grid";
-
-  } else {
-
-    document
-      .getElementById("loginScreen")
-      .style.display = "grid";
-
-    document
-      .getElementById("appShell")
-      .style.display = "none";
-
-  }
-
+  document
+    .getElementById("appShell")
+    .style.display =
+      hasSession ? "grid" : "none";
 }
 
 function setAuthMode(mode) {
@@ -1371,23 +1363,6 @@ if ("serviceWorker" in navigator) {
 
 }
 
-let deferredPrompt;
-
-window.addEventListener(
-  "beforeinstallprompt",
-  (e) => {
-
-    e.preventDefault();
-
-    deferredPrompt = e;
-
-    document
-      .getElementById("installBtn")
-      .hidden = false;
-
-  }
-);
-
 document
 .getElementById("installBtn")
 ?.addEventListener("click", async () => {
@@ -1491,4 +1466,40 @@ if (
 
 }
 
- 
+ let deferredPrompt;
+
+window.addEventListener(
+  "beforeinstallprompt",
+  (event) => {
+
+    event.preventDefault();
+
+    deferredPrompt = event;
+
+    document
+      .getElementById("installBtn")
+      .hidden = false;
+
+  }
+);
+
+document
+  .getElementById("installBtn")
+  ?.addEventListener(
+    "click",
+    async () => {
+
+      if (!deferredPrompt) return;
+
+      deferredPrompt.prompt();
+
+      await deferredPrompt.userChoice;
+
+      deferredPrompt = null;
+
+      document
+        .getElementById("installBtn")
+        .hidden = true;
+
+    }
+  );

@@ -69,7 +69,6 @@
           <div class="top-actions">
             <button class="ghost-btn" id="installBtn" hidden> Install App</button>
             <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
-            <button class="primary-btn" id="openTaskModalBtn" type="button">+ Assign task</button>
             <button class="ghost-btn" id="exportDataBtn"> Export Data</button>
             <button class="ghost-btn" id="importDataBtn"> Import Data</button>
             <input type="file" id="importFile" accept=".json" hidden>
@@ -161,20 +160,46 @@
         </section>
 
         <section class="view" id="tasks-view" aria-labelledby="tasks-heading">
-          <div class="section-head">
-            <h2 id="tasks-heading" style="font-size:xx-large;">Task Workflow</h2>
-            <div class="filters">
-              <select id="taskFreelancerFilter" aria-label="Filter by freelancer"></select>
-              <select id="taskTypeFilter" aria-label="Filter by task type"></select>
-              <select id="taskStatusFilter" aria-label="Filter by status">
-                <option value="all">All statuses</option>
-                <option value="Briefed">Briefed</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Review">Review</option>
-                <option value="Completed">Completed</option>
-              </select>
-            </div>
-          </div>
+         <div class="section-head">
+
+  <h2 id="tasks-heading"
+      style="font-size:xx-large;">
+    Task Workflow
+  </h2>
+
+    <div class="filters">
+
+      <input id="taskSearch" type="search" placeholder="Search task or batch">
+      <select id="taskFreelancerFilter"></select>
+
+      <select id="taskTypeFilter"></select>
+
+      <select id="taskStatusFilter">
+        <option value="all">
+          All statuses
+        </option>
+        <option value="Briefed">
+          Briefed
+        </option>
+        <option value="In Progress">
+          In Progress
+        </option>
+        <option value="Review">
+          Review
+        </option>
+        <option value="Completed">
+          Completed
+        </option>
+      </select>
+          <button
+      class="primary-btn"
+      id="openTaskModalBtn"
+      type="button">
+      + Assign Task
+    </button>
+    </div>
+
+</div>
           <div class="kanban" id="taskBoard"></div>
         </section>
 
@@ -425,5 +450,18 @@ Batch Name
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
+
+    <script>
+if ("serviceWorker" in navigator) {
+
+  window.addEventListener("load", () => {
+
+    navigator.serviceWorker
+      .register("./service-worker.js");
+
+  });
+
+}
+</script>
   </body>
 </html>
