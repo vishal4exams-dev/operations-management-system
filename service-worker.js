@@ -1,4 +1,4 @@
-const CACHE_NAME = "oms-v3";
+const CACHE_NAME = "oms-v4";
 
 const urlsToCache = [
   "./",

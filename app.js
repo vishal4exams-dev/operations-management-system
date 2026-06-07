@@ -10,6 +10,26 @@ const supabaseClient =
     SUPABASE_KEY
   );
 
+  const STORAGE_KEY = "freelancer-management-system-v1";
+const SESSION_KEY = "freelancer-management-session-v1";
+
+
+  supabaseClient.auth.getSession()
+.then(({ data }) => {
+
+  if (data.session) {
+
+    sessionStorage.setItem(
+      SESSION_KEY,
+      data.session.user.id
+    );
+
+    updateAuthView();
+
+  }
+
+});
+
   async function testSupabase() {
 
   const { data, error } =
@@ -23,9 +43,6 @@ const supabaseClient =
 }
 
 testSupabase();
-
-const STORAGE_KEY = "freelancer-management-system-v1";
-const SESSION_KEY = "freelancer-management-session-v1";
 
 const statuses = ["Briefed", "In Progress", "Review", "Rework", "Completed"];
 const taskTypes = ["Transcription QC", "Audio QC", "Annotation", "Speech Recording", "Image QC", "Others"];
@@ -1441,10 +1458,6 @@ function importData(file) {
   reader.readAsText(file);
 
 }
-
-document
-.getElementById("forgotPasswordBtn")
-?.addEventListener("click", async () => {
 
   const email =
     document
