@@ -1395,6 +1395,9 @@ function importData(file) {
       .pop()
       .toLowerCase();
 
+      toast("Import started");
+      toast("File type: " + extension);
+
   // JSON Import
   if (extension === "json") {
 
@@ -1584,7 +1587,7 @@ document
   toast("Install option not available yet.");
   return;
 }
-
+      deferredPrompt.prompt();
       await deferredPrompt.userChoice;
 
       deferredPrompt = null;

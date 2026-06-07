@@ -1,11 +1,12 @@
-const CACHE_NAME = "oms-v11";
+const CACHE_NAME = "oms-v12";
 
 const urlsToCache = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
-  "./manifest.json"
+  "./manifest.json",
+  "./xlsx.full.min.js"
 ];
 
 self.addEventListener("install", event => {
