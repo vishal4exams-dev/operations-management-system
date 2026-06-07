@@ -531,6 +531,9 @@ function updateAuthView() {
 
   const isLoggedIn = !!userId;
 
+  console.log("SESSION:", userId);
+console.log("LOGGED IN:", isLoggedIn);
+
   els.loginScreen.classList.toggle(
     "hidden",
     isLoggedIn
