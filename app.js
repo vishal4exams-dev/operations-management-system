@@ -1389,21 +1389,14 @@ function exportData() {
 
 function importData(file) {
 
- const extension =
-  file.name
-    .split(".")
-    .pop()
-    .toLowerCase();
+  const extension =
+    file.name
+      .split(".")
+      .pop()
+      .toLowerCase();
 
-if (extension === "json")
-  if (typeof XLSX === "undefined") {
-
-  toast(
-    "Excel library not loaded."
-  );
-
-  return;
-} {
+  // JSON Import
+  if (extension === "json") {
 
     const reader =
       new FileReader();
@@ -1419,19 +1412,21 @@ if (extension === "json")
 
         Object.assign(
           state,
-          imported
+          normalizeState(imported)
         );
 
         saveState();
         render();
 
-        alert(
+        toast(
           "JSON imported successfully."
         );
 
-      } catch {
+      } catch (err) {
 
-        alert(
+        console.error(err);
+
+        toast(
           "Invalid JSON file."
         );
 
@@ -1444,36 +1439,71 @@ if (extension === "json")
     return;
   }
 
-  const reader =
-    new FileReader();
+  // Excel Import
+  if (
+    extension === "xlsx" ||
+    extension === "xls" ||
+    extension === "csv"
+  ) {
 
-  reader.onload = (e) => {
+    if (typeof XLSX === "undefined") {
 
-   const workbook =
-  XLSX.read(
-    e.target.result,
-    {
-      type: "array"
-    }
-  );
-
-    const sheet =
-      workbook.Sheets[
-        workbook.SheetNames[0]
-      ];
-
-    const rows =
-      XLSX.utils.sheet_to_json(
-        sheet
+      toast(
+        "Excel library not loaded."
       );
 
-    importFreelancers(
-      rows
+      return;
+    }
+
+    const reader =
+      new FileReader();
+
+    reader.onload = (e) => {
+
+      try {
+
+        const workbook =
+          XLSX.read(
+            e.target.result,
+            {
+              type: "array"
+            }
+          );
+
+        const sheet =
+          workbook.Sheets[
+            workbook.SheetNames[0]
+          ];
+
+        const rows =
+          XLSX.utils.sheet_to_json(
+            sheet
+          );
+
+        importFreelancers(rows);
+
+      } catch (err) {
+
+        console.error(err);
+
+        toast(
+          "Invalid Excel file."
+        );
+
+      }
+
+    };
+
+    reader.readAsArrayBuffer(
+      file
     );
 
-  };
+    return;
+  }
 
-  reader.readAsArrayBuffer(file);
+  toast(
+    "Unsupported file type."
+  );
 
 }
 
