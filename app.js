@@ -166,6 +166,9 @@ document.getElementById("loginForm")
       password
     });
 
+    console.log("LOGIN DATA", data);
+console.log("LOGIN ERROR", error);
+
   if (error) {
 
     toast(error.message);
