@@ -498,10 +498,24 @@ function normalizeState(nextState) {
 }
 
 function updateAuthView() {
-  const userId = sessionStorage.getItem(SESSION_KEY);
-  const isLoggedIn = state.users.some((user) => user.id === userId);
-  els.loginScreen.classList.toggle("hidden", isLoggedIn);
-  els.appShell.classList.toggle("locked", !isLoggedIn);
+
+  const userId =
+    sessionStorage.getItem(
+      SESSION_KEY
+    );
+
+  const isLoggedIn = !!userId;
+
+  els.loginScreen.classList.toggle(
+    "hidden",
+    isLoggedIn
+  );
+
+  els.appShell.classList.toggle(
+    "locked",
+    !isLoggedIn
+  );
+
 }
 
 function setAuthMode(mode) {
