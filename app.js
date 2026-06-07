@@ -269,9 +269,14 @@ document
 
 });
 
-document.getElementById("logoutBtn").addEventListener("click", () => {
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+
+  await supabaseClient.auth.signOut();
+
   sessionStorage.removeItem(SESSION_KEY);
+
   updateAuthView();
+
 });
 
 document.getElementById("openTaskModalBtn").addEventListener("click", () => {
@@ -489,14 +494,14 @@ function normalizeState(nextState) {
 }));
   nextState.emailTemplate = nextState.emailTemplate || clone(demoState.emailTemplate);
   nextState.emailSettings = nextState.emailSettings || clone(demoState.emailSettings);
-  nextState.users = nextState.users || [
-    {
-      id: "user-admin",
-      name: "Admin",
-      email: nextState.login?.email || "admin@yourdomain.com",
-      password: nextState.login?.password || "admin123"
-    }
-  ];
+  // nextState.users = nextState.users || [
+  //   {
+  //     id: "user-admin",
+  //     name: "Admin",
+  //     email: nextState.login?.email || "admin@yourdomain.com",
+  //     password: nextState.login?.password || "admin123"
+  //   }
+  // ];
   nextState.tasks = nextState.tasks.map((task) => ({
     ...task,
     taskType: task.taskType || "Others",
@@ -1459,38 +1464,4 @@ function importData(file) {
 
 }
 
-  const email =
-    document
-      .getElementById("loginEmail")
-      .value
-      .trim();
-
-  if (!email) {
-
-    toast("Enter email first.");
-    return;
-
-  }
-
-  const { error } =
-    await supabaseClient.auth.resetPasswordForEmail(
-      email,
-      {
-        redirectTo:
-          window.location.origin
-      }
-    );
-
-  if (error) {
-
-    toast(error.message);
-
-  } else {
-
-    toast(
-      "Password reset email sent."
-    );
-
-  }
-
-});
+ 
