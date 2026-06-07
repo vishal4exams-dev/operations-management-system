@@ -105,15 +105,7 @@ const demoState = {
   emailSettings: {
     senderName: "Associate Desk",
     senderEmail: "tasks@yourdomain.com"
-  },
-  users: [
-    {
-      id: "user-admin",
-      name: "Admin",
-      email: "admin@yourdomain.com",
-      password: "admin123"
-    }
-  ]
+  }
 };
 
 let state = loadState();
@@ -176,14 +168,20 @@ console.log("LOGIN ERROR", error);
 
   }
 
-  sessionStorage.setItem(
-    SESSION_KEY,
-    data.user.id
-  );
+ sessionStorage.setItem(
+  SESSION_KEY,
+  "logged-in"
+);
 
-  updateAuthView();
+document
+  .getElementById("loginScreen")
+  .style.display = "none";
 
-  toast("Login successful.");
+document
+  .getElementById("appShell")
+  .style.display = "grid";
+
+toast("Login successful.");
 
 });
 
@@ -524,25 +522,32 @@ function normalizeState(nextState) {
 
 function updateAuthView() {
 
-  const userId =
-    sessionStorage.getItem(
+  const hasSession =
+    !!sessionStorage.getItem(
       SESSION_KEY
     );
 
-  const isLoggedIn = !!userId;
+  if (hasSession) {
 
-  console.log("SESSION:", userId);
-console.log("LOGGED IN:", isLoggedIn);
+    document
+      .getElementById("loginScreen")
+      .style.display = "none";
 
-  els.loginScreen.classList.toggle(
-    "hidden",
-    isLoggedIn
-  );
+    document
+      .getElementById("appShell")
+      .style.display = "grid";
 
-  els.appShell.classList.toggle(
-    "locked",
-    !isLoggedIn
-  );
+  } else {
+
+    document
+      .getElementById("loginScreen")
+      .style.display = "grid";
+
+    document
+      .getElementById("appShell")
+      .style.display = "none";
+
+  }
 
 }
 
@@ -1451,6 +1456,22 @@ function importData(file) {
       saveState();
 
       render();
+
+if (
+  sessionStorage.getItem(
+    SESSION_KEY
+  )
+) {
+
+  document
+    .getElementById("loginScreen")
+    .style.display = "none";
+
+  document
+    .getElementById("appShell")
+    .style.display = "grid";
+
+}
 
       alert(
         "Backup restored successfully."
