@@ -1399,7 +1399,11 @@ function importData(file) {
       toast("File type: " + extension);
 
   // JSON Import
-  if (extension === "json") {
+  if (extension === "json" ||
+    extension === "xlsx" ||
+  extension === "xls" ||
+  extension === "csv"
+  ) {
 
     const reader =
       new FileReader();
