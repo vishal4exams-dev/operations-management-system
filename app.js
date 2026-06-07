@@ -130,36 +130,21 @@ const els = {
 document.getElementById("showLoginBtn").addEventListener("click", () => setAuthMode("login"));
 document.getElementById("showSignupBtn").addEventListener("click", () => setAuthMode("signup"));
 
-document.getElementById("loginForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const email = document.getElementById("loginEmail").value.trim().toLowerCase();
-  const password = document.getElementById("loginPassword").value;
-  const { error } =await supabaseClient.auth.signInWithPassword({email,password});
-  if (user) {
-    sessionStorage.setItem(SESSION_KEY, user.id);
-    updateAuthView();
-    toast(`Logged in as ${user.name}.`);
-    return;
-  }
-  toast("Invalid login details.");
-});
-
-document.getElementById("signupForm")
+document.getElementById("loginForm")
 .addEventListener("submit", async (event) => {
 
   event.preventDefault();
 
-  const name =
-    document.getElementById("signupName").value.trim();
-
   const email =
-    document.getElementById("signupEmail").value.trim();
+    document.getElementById("loginEmail")
+      .value.trim();
 
   const password =
-    document.getElementById("signupPassword").value;
+    document.getElementById("loginPassword")
+      .value;
 
   const { data, error } =
-    await supabaseClient.auth.signUp({
+    await supabaseClient.auth.signInWithPassword({
       email,
       password
     });
@@ -171,9 +156,99 @@ document.getElementById("signupForm")
 
   }
 
-  toast(
-    "Account created. Check email."
+  sessionStorage.setItem(
+    SESSION_KEY,
+    data.user.id
   );
+
+  updateAuthView();
+
+  toast("Login successful.");
+
+});
+
+document.getElementById("signupForm")
+.addEventListener("submit", async (event) => {
+
+  event.preventDefault();
+
+  const name =
+    document.getElementById("signupName")
+      .value.trim();
+
+  const email =
+    document.getElementById("signupEmail")
+      .value.trim();
+
+  const password =
+    document.getElementById("signupPassword")
+      .value;
+
+  const { data, error } =
+    await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name
+        }
+      }
+    });
+
+  if (error) {
+
+    toast(error.message);
+    return;
+
+  }
+
+  toast(
+    "Account created. Check your email."
+  );
+
+  document
+    .getElementById("signupForm")
+    .reset();
+
+});
+
+document
+.getElementById("forgotPasswordBtn")
+?.addEventListener("click", async () => {
+
+  const email =
+    document
+      .getElementById("loginEmail")
+      .value
+      .trim();
+
+  if (!email) {
+
+    toast("Enter your email first.");
+    return;
+
+  }
+
+  const { error } =
+    await supabaseClient.auth.resetPasswordForEmail(
+      email,
+      {
+        redirectTo:
+          window.location.origin
+      }
+    );
+
+  if (error) {
+
+    toast(error.message);
+
+  } else {
+
+    toast(
+      "Password reset email sent."
+    );
+
+  }
 
 });
 
