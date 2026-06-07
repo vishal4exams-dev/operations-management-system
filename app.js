@@ -1389,9 +1389,21 @@ function exportData() {
 
 function importData(file) {
 
-  if (
-    file.name.endsWith(".json")
-  ) {
+ const extension =
+  file.name
+    .split(".")
+    .pop()
+    .toLowerCase();
+
+if (extension === "json")
+  if (typeof XLSX === "undefined") {
+
+  toast(
+    "Excel library not loaded."
+  );
+
+  return;
+} {
 
     const reader =
       new FileReader();
@@ -1437,13 +1449,13 @@ function importData(file) {
 
   reader.onload = (e) => {
 
-    const workbook =
-      XLSX.read(
-        e.target.result,
-        {
-          type: "binary"
-        }
-      );
+   const workbook =
+  XLSX.read(
+    e.target.result,
+    {
+      type: "array"
+    }
+  );
 
     const sheet =
       workbook.Sheets[
@@ -1461,9 +1473,7 @@ function importData(file) {
 
   };
 
-  reader.readAsBinaryString(
-    file
-  );
+  reader.readAsArrayBuffer(file);
 
 }
 
