@@ -71,7 +71,7 @@
             <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
             <button class="ghost-btn" id="exportDataBtn"> Export Data</button>
             <button class="ghost-btn" id="importDataBtn"> Import Data</button>
-            <input type="file" id="importFile" accept=".json" hidden>
+            <input type="file" id="importFile" accept=".json,.xlsx,.xls,.csv" hidden>
           </div>
         </header>
 
@@ -449,6 +449,7 @@ Batch Name
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
     <script src="app.js"></script>
 
     <script>

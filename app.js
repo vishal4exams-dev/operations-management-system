@@ -30,18 +30,6 @@ const SESSION_KEY = "freelancer-management-session-v1";
 
 });
 
-  async function testSupabase() {
-
-  const { data, error } =
-    await supabaseClient
-      .from("operations")
-      .select("*");
-
-  console.log(data);
-  console.log(error);
-
-}
-
 const statuses = ["Briefed", "In Progress", "Review", "Rework", "Completed"];
 const taskTypes = ["Transcription QC", "Audio QC", "Annotation", "Speech Recording", "Image QC", "Others"];
 
@@ -65,7 +53,7 @@ const demoState = {
       id: "task-1",
       taskType: "Others",
       batchName: "Website audit - June 2026",
-      freelancerId: "fr-3",
+      freelancerId: "fr-1",
       startDate: "2026-06-02",
       deadlineDate: "2026-06-08",
       taskCount: 12,
@@ -1363,16 +1351,6 @@ if ("serviceWorker" in navigator) {
 
 }
 
-document
-.getElementById("installBtn")
-?.addEventListener("click", async () => {
-
-  deferredPrompt.prompt();
-
-  await deferredPrompt.userChoice;
-
-});
-
 function exportData() {
 
   const data = JSON.stringify(
@@ -1411,58 +1389,131 @@ function exportData() {
 
 function importData(file) {
 
+  if (
+    file.name.endsWith(".json")
+  ) {
+
+    const reader =
+      new FileReader();
+
+    reader.onload = (e) => {
+
+      try {
+
+        const imported =
+          JSON.parse(
+            e.target.result
+          );
+
+        Object.assign(
+          state,
+          imported
+        );
+
+        saveState();
+        render();
+
+        alert(
+          "JSON imported successfully."
+        );
+
+      } catch {
+
+        alert(
+          "Invalid JSON file."
+        );
+
+      }
+
+    };
+
+    reader.readAsText(file);
+
+    return;
+  }
+
   const reader =
     new FileReader();
 
   reader.onload = (e) => {
 
-    try {
-
-      const imported =
-        JSON.parse(
-          e.target.result
-        );
-
-      Object.assign(
-        state,
-        imported
+    const workbook =
+      XLSX.read(
+        e.target.result,
+        {
+          type: "binary"
+        }
       );
 
-      saveState();
+    const sheet =
+      workbook.Sheets[
+        workbook.SheetNames[0]
+      ];
 
-      render();
-
-if (
-  sessionStorage.getItem(
-    SESSION_KEY
-  )
-) {
-
-  document
-    .getElementById("loginScreen")
-    .style.display = "none";
-
-  document
-    .getElementById("appShell")
-    .style.display = "grid";
-
-}
-
-      alert(
-        "Backup restored successfully."
+    const rows =
+      XLSX.utils.sheet_to_json(
+        sheet
       );
 
-    } catch {
-
-      alert(
-        "Invalid backup file."
-      );
-
-    }
+    importFreelancers(
+      rows
+    );
 
   };
 
-  reader.readAsText(file);
+  reader.readAsBinaryString(
+    file
+  );
+
+}
+
+function importFreelancers(rows) {
+
+  rows.forEach(row => {
+
+    state.freelancers.push({
+
+      id: uid("fr"),
+
+      name:
+        row.Name || "",
+
+      email:
+        row.Email || "",
+
+      mobile:
+        row.Mobile || "",
+
+      role:
+        row.Role || "",
+
+      state:
+        row.State || "",
+
+      district:
+        row.District || "",
+
+      language:
+        row.Language || "",
+
+      rate:
+        row.Rate || "",
+
+      status:
+        row.Status ||
+        "Available"
+
+    });
+
+  });
+
+  saveState();
+
+  render();
+
+  toast(
+    `${rows.length} freelancers imported`
+  );
 
 }
 
@@ -1489,9 +1540,10 @@ document
     "click",
     async () => {
 
-      if (!deferredPrompt) return;
-
-      deferredPrompt.prompt();
+      if (!deferredPrompt) {
+  toast("Install option not available yet.");
+  return;
+}
 
       await deferredPrompt.userChoice;
 
