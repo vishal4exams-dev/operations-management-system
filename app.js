@@ -337,6 +337,8 @@ document
 
     }
 
+    e.target.value = "";
+
   }
 );
 
@@ -470,17 +472,34 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function normalizeState(nextState) {
-    nextState.operations =
-  nextState.operations || [];
-    nextState.freelancers = nextState.freelancers.map(person => ({
-  ...person,
-  state: person.state || "",
-  district: person.district || "",
-  language: person.language || ""
-}));
-  nextState.emailTemplate = nextState.emailTemplate || clone(demoState.emailTemplate);
-  nextState.emailSettings = nextState.emailSettings || clone(demoState.emailSettings);
+function normalizeState(nextState = {}) {
+  const normalized = {
+    ...clone(demoState),
+    ...nextState
+  };
+
+  normalized.operations = Array.isArray(nextState.operations)
+    ? nextState.operations
+    : [];
+
+  normalized.freelancers = Array.isArray(nextState.freelancers)
+    ? nextState.freelancers.map(person => ({
+      ...person,
+      state: person.state || "",
+      district: person.district || "",
+      language: person.language || ""
+    }))
+    : [];
+
+  normalized.emailTemplate = {
+    ...clone(demoState.emailTemplate),
+    ...(nextState.emailTemplate || {})
+  };
+
+  normalized.emailSettings = {
+    ...clone(demoState.emailSettings),
+    ...(nextState.emailSettings || {})
+  };
   // nextState.users = nextState.users || [
   //   {
   //     id: "user-admin",
@@ -489,21 +508,32 @@ function normalizeState(nextState) {
   //     password: nextState.login?.password || "admin123"
   //   }
   // ];
-  nextState.tasks = nextState.tasks.map((task) => ({
+  normalized.tasks = Array.isArray(nextState.tasks)
+    ? nextState.tasks.map((task) => ({
     ...task,
     taskType: task.taskType || "Others",
     taskCount: Number(task.taskCount || 1),
     payPerTask: Number(task.payPerTask ?? task.amount ?? 0),
     startDate: task.startDate || new Date().toISOString().slice(0, 10),
     deadlineDate: task.deadlineDate || task.due || new Date().toISOString().slice(0, 10)
-  }));
-  nextState.emailTemplate.subject = nextState.emailTemplate.subject.replaceAll("{{taskTitle}}", "{{taskType}}");
-  nextState.emailTemplate.body = nextState.emailTemplate.body
+  }))
+    : [];
+
+  normalized.notifications = Array.isArray(nextState.notifications)
+    ? nextState.notifications
+    : [];
+
+  normalized.emailTemplate.subject =
+    String(normalized.emailTemplate.subject || demoState.emailTemplate.subject)
+      .replaceAll("{{taskTitle}}", "{{taskType}}");
+
+  normalized.emailTemplate.body =
+    String(normalized.emailTemplate.body || demoState.emailTemplate.body)
     .replaceAll("{{taskTitle}}", "{{taskType}}")
     .replaceAll("{{dueDate}}", "{{deadlineDate}}")
     .replaceAll("Due date:", "Deadline date:")
     .replace(/\nPayment: \$\{\{amount\}\}/g, "");
-  return nextState;
+  return normalized;
 }
 
 function updateAuthView() {
@@ -1395,15 +1425,10 @@ function importData(file) {
       .pop()
       .toLowerCase();
 
-      toast("Import started");
-      toast("File type: " + extension);
+  toast("Import started: " + extension.toUpperCase());
 
   // JSON Import
-  if (extension === "json" ||
-    extension === "xlsx" ||
-  extension === "xls" ||
-  extension === "csv"
-  ) {
+  if (extension === "json") {
 
     const reader =
       new FileReader();
@@ -1484,8 +1509,20 @@ function importData(file) {
 
         const rows =
           XLSX.utils.sheet_to_json(
-            sheet
+            sheet,
+            {
+              defval: ""
+            }
           );
+
+        if (!rows.length) {
+
+          toast(
+            "Import file is empty."
+          );
+
+          return;
+        }
 
         importFreelancers(rows);
 
@@ -1516,50 +1553,97 @@ function importData(file) {
 
 function importFreelancers(rows) {
 
-  rows.forEach(row => {
+  const getValue = (row, names) => {
 
-    state.freelancers.push({
+    const normalizedRow =
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          String(key).trim().toLowerCase(),
+          value
+        ])
+      );
 
-      id: uid("fr"),
+    for (const name of names) {
 
-      name:
-        row.Name || "",
+      const value =
+        normalizedRow[
+          name.toLowerCase()
+        ];
 
-      email:
-        row.Email || "",
+      if (value !== undefined && value !== null) {
 
-      mobile:
-        row.Mobile || "",
+        return String(value).trim();
 
-      role:
-        row.Role || "",
+      }
 
-      state:
-        row.State || "",
+    }
 
-      district:
-        row.District || "",
+    return "";
 
-      language:
-        row.Language || "",
+  };
 
-      rate:
-        row.Rate || "",
+  const importedFreelancers =
+    rows
+      .map(row => ({
 
-      status:
-        row.Status ||
-        "Available"
+        id: uid("fr"),
 
-    });
+        name:
+          getValue(row, ["Name", "Freelancer Name", "Full Name"]),
 
-  });
+        email:
+          getValue(row, ["Email", "Email ID", "Email Address"]),
+
+        mobile:
+          getValue(row, ["Mobile", "Phone", "Contact", "Contact Number"]),
+
+        role:
+          getValue(row, ["Role", "Skill", "Designation"]),
+
+        state:
+          getValue(row, ["State"]),
+
+        district:
+          getValue(row, ["District", "City"]),
+
+        language:
+          getValue(row, ["Language", "Languages"]),
+
+        rate:
+          getValue(row, ["Rate", "Pay Rate", "Price"]),
+
+        status:
+          getValue(row, ["Status"]) ||
+          "Available"
+
+      }))
+      .filter(person =>
+        person.name ||
+        person.email ||
+        person.mobile
+      );
+
+  if (!importedFreelancers.length) {
+
+    toast(
+      "No valid freelancer rows found."
+    );
+
+    return;
+
+  }
+
+  state.freelancers.push(
+    ...importedFreelancers
+  );
+
 
   saveState();
 
   render();
 
   toast(
-    `${rows.length} freelancers imported`
+    `${importedFreelancers.length} freelancers imported`
   );
 
 }
