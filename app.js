@@ -10,6 +10,8 @@ const supabaseClient =
     SUPABASE_KEY
   );
 
+const EMAIL_FUNCTION_NAME = "send-email";
+
   const STORAGE_KEY = "freelancer-management-system-v1";
 const SESSION_KEY = "freelancer-management-session-v1";
 
@@ -25,6 +27,7 @@ const SESSION_KEY = "freelancer-management-session-v1";
     );
 
     updateAuthView();
+    queueDeadlineEmails();
 
   }
 
@@ -96,6 +99,7 @@ const demoState = {
 
 let state = loadState();
 state.operations = state.operations || [];
+let deadlineEmailQueueRunning = false;
 
 const els = {
   navButtons: document.querySelectorAll(".nav-btn"),
@@ -168,6 +172,7 @@ document
   .style.display = "grid";
 
 toast("Login successful.");
+queueDeadlineEmails();
 
 });
 
@@ -299,15 +304,13 @@ document.getElementById("selectAllPayments").addEventListener("change", (event) 
   });
 });
 
-document.getElementById("markPaidBtn").addEventListener("click", () => {
+document.getElementById("markPaidBtn").addEventListener("click", async () => {
   const selected = [...document.querySelectorAll(".payment-check:checked")].map((box) => box.value);
-  state.tasks.forEach((task) => {
-    if (selected.includes(task.id)) {
-      task.paymentStatus = "Paid";
-    }
-  });
-  saveState();
-  render();
+
+  for (const taskId of selected) {
+    await updateTask(taskId, { paymentStatus: "Paid" });
+  }
+
   toast(selected.length ? "Selected payments marked paid." : "Select at least one payment row.");
 });
 
@@ -376,7 +379,7 @@ document
   document.getElementById("freelancerModal").close();
 });
 
-document.getElementById("taskForm").addEventListener("submit", (event) => {
+document.getElementById("taskForm").addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const data = Object.fromEntries(
@@ -394,11 +397,19 @@ document.getElementById("taskForm").addEventListener("submit", (event) => {
       );
 
     if (index !== -1) {
+      const previousTask =
+        { ...state.tasks[index] };
+
       state.tasks[index] = {
         ...state.tasks[index],
         ...data,
         taskCount: Number(data.taskCount)
       };
+
+      await sendTaskUpdateEmail(
+        state.tasks[index],
+        previousTask
+      );
     }
 
     toast("Task updated.");
@@ -423,11 +434,14 @@ document.getElementById("taskForm").addEventListener("submit", (event) => {
 
     createAssignmentNotification(task);
 
-    toast("Task assigned.");
+    const emailSent =
+      await sendTaskAssignmentEmail(task);
 
-    setTimeout(() => {
-      openEmailDraft(task);
-    }, 200);
+    toast(
+      emailSent
+        ? "Task assigned and email sent."
+        : "Task assigned, but email could not be sent."
+    );
   }
 
   saveState();
@@ -523,6 +537,9 @@ function normalizeState(nextState = {}) {
     ? nextState.notifications
     : [];
 
+  normalized.emailEvents =
+    nextState.emailEvents || {};
+
   normalized.emailTemplate.subject =
     String(normalized.emailTemplate.subject || demoState.emailTemplate.subject)
       .replaceAll("{{taskTitle}}", "{{taskType}}");
@@ -601,6 +618,7 @@ function render() {
   els.emailSubject.value = state.emailTemplate.subject;
   els.emailBody.value = state.emailTemplate.body;
   updateAuthView();
+  queueDeadlineEmails();
 }
 
 function populateFreelancerFilters() {
@@ -1029,9 +1047,18 @@ function renderNotification(note) {
   `;
 }
 
-function updateTask(taskId, patch) {
+async function updateTask(taskId, patch) {
   const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    return;
+  }
+
+  const previousTask =
+    { ...task };
+
   Object.assign(task, patch);
+
   if (patch.status === "Completed" && task.paymentStatus !== "Paid") {
     state.notifications.push({
       id: uid("note"),
@@ -1042,7 +1069,19 @@ function updateTask(taskId, patch) {
       read: false,
       createdAt: new Date().toISOString()
     });
+
+    await sendTaskCompletionEmail(task);
   }
+
+  if (
+    patch.paymentStatus &&
+    patch.paymentStatus !== previousTask.paymentStatus
+  ) {
+
+    await sendPaymentStatusEmail(task);
+
+  }
+
   saveState();
   render();
 }
@@ -1072,27 +1111,304 @@ function createAssignmentNotification(task) {
   });
 }
 
-function openEmailDraft(task) {
+function buildTaskDetails(task) {
   const person = findFreelancer(task.freelancerId);
-  if (!person) return;
+  const operation = findOperation(task.operationId);
+
+  return [
+    `Freelancer: ${person?.name || "-"}`,
+    `Task type: ${getTaskType(task)}`,
+    `Batch: ${operation?.batchName || "-"}`,
+    `Count: ${Number(task.taskCount || 0)}`,
+    `Start date: ${formatDate(task.startDate)}`,
+    `Deadline date: ${formatDate(task.deadlineDate)}`,
+    `Status: ${task.status || "-"}`,
+    `Payment status: ${task.paymentStatus || "-"}`,
+    "",
+    "Description / brief:",
+    task.brief || "-"
+  ].join("\n");
+}
+
+function buildHtmlEmail(body) {
+  return `
+    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f172a">
+      ${escapeHtml(body).replaceAll("\n", "<br>")}
+    </div>
+  `;
+}
+
+function hasActiveSession() {
+  return !!sessionStorage.getItem(SESSION_KEY);
+}
+
+function isValidRecipient(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ""))
+    && !/@example\.(com|org|net)$/i.test(String(email || ""));
+}
+
+function wasEmailSent(eventKey) {
+  return !!state.emailEvents?.[eventKey];
+}
+
+function markEmailSent(eventKey) {
+  if (!eventKey) return;
+
+  state.emailEvents = state.emailEvents || {};
+  state.emailEvents[eventKey] = new Date().toISOString();
+  saveState();
+}
+
+async function sendFreelancerEmail({
+  freelancer,
+  subject,
+  body,
+  eventKey,
+  silent = false
+}) {
+  if (eventKey && wasEmailSent(eventKey)) {
+    return true;
+  }
+
+  if (!hasActiveSession()) {
+    if (!silent) {
+      toast("Login is required before sending email.");
+    }
+
+    return false;
+  }
+
+  if (!freelancer || !isValidRecipient(freelancer.email)) {
+    if (!silent) {
+      toast("Freelancer email is missing or invalid.");
+    }
+
+    return false;
+  }
+
+  try {
+    const { error } =
+      await supabaseClient.functions.invoke(
+        EMAIL_FUNCTION_NAME,
+        {
+          body: {
+            to: freelancer.email,
+            subject,
+            text: body,
+            html: buildHtmlEmail(body),
+            replyTo: state.emailSettings.senderEmail,
+            senderName: state.emailSettings.senderName
+          }
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    markEmailSent(eventKey);
+    return true;
+
+  } catch (err) {
+    console.error("Email send failed", err);
+
+    if (!silent) {
+      toast("Email could not be sent. Check Supabase function setup.");
+    }
+
+    return false;
+  }
+}
+
+async function sendTaskAssignmentEmail(task) {
+  const person = findFreelancer(task.freelancerId);
+
   const replacements = {
-    "{{freelancerName}}": person.name,
+    "{{freelancerName}}": person?.name || "",
     "{{taskType}}": getTaskType(task),
     "{{taskCount}}": Number(task.taskCount || 0),
     "{{startDate}}": formatDate(task.startDate),
     "{{deadlineDate}}": formatDate(task.deadlineDate),
-    "{{brief}}": task.brief,
+    "{{brief}}": task.brief || "",
     "{{senderName}}": state.emailSettings.senderName,
     "{{senderEmail}}": state.emailSettings.senderEmail
   };
+
   let subject = state.emailTemplate.subject;
   let body = state.emailTemplate.body;
+
   Object.entries(replacements).forEach(([token, value]) => {
     subject = subject.replaceAll(token, value);
     body = body.replaceAll(token, value);
   });
-  const signature = `\n\n--\n${state.emailSettings.senderName}\n${state.emailSettings.senderEmail}`;
-  window.location.href = `mailto:${encodeURIComponent(person.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + signature)}`;
+
+  return sendFreelancerEmail({
+    freelancer: person,
+    subject,
+    body,
+    eventKey: `task-assigned-${task.id}`
+  });
+}
+
+async function sendTaskUpdateEmail(task, previousTask) {
+  const changedFields = [
+    ["Task type", previousTask.taskType, task.taskType],
+    ["Freelancer", previousTask.freelancerId, task.freelancerId],
+    ["Start date", previousTask.startDate, task.startDate],
+    ["Deadline date", previousTask.deadlineDate, task.deadlineDate],
+    ["Count", previousTask.taskCount, task.taskCount],
+    ["Brief", previousTask.brief, task.brief]
+  ].filter(([, before, after]) => String(before || "") !== String(after || ""));
+
+  if (!changedFields.length) {
+    return true;
+  }
+
+  const person = findFreelancer(task.freelancerId);
+  const changeSummary =
+    changedFields
+      .map(([label]) => `- ${label}`)
+      .join("\n");
+
+  return sendFreelancerEmail({
+    freelancer: person,
+    subject: `Task updated: ${getTaskType(task)}`,
+    body: [
+      `Hi ${person?.name || ""},`,
+      "",
+      "Your assigned task has been updated.",
+      "",
+      "Updated fields:",
+      changeSummary,
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `task-updated-${task.id}-${Date.now()}`
+  });
+}
+
+async function sendTaskCompletionEmail(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendFreelancerEmail({
+    freelancer: person,
+    subject: `Task completed: ${getTaskType(task)}`,
+    body: [
+      `Hi ${person?.name || ""},`,
+      "",
+      "Your task has been marked completed. Payment review is now pending.",
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `task-completed-${task.id}`
+  });
+}
+
+async function sendPaymentStatusEmail(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendFreelancerEmail({
+    freelancer: person,
+    subject: `Payment update: ${getTaskType(task)}`,
+    body: [
+      `Hi ${person?.name || ""},`,
+      "",
+      `Payment status for your task is now: ${task.paymentStatus}.`,
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `payment-${task.id}-${task.paymentStatus}`
+  });
+}
+
+async function queueDeadlineEmails() {
+  if (
+    deadlineEmailQueueRunning ||
+    !hasActiveSession()
+  ) {
+    return;
+  }
+
+  deadlineEmailQueueRunning = true;
+
+  try {
+    const today =
+      new Date();
+
+    today.setHours(0, 0, 0, 0);
+
+    for (const task of state.tasks) {
+      if (
+        !task.deadlineDate ||
+        task.status === "Completed"
+      ) {
+        continue;
+      }
+
+      const deadline =
+        new Date(task.deadlineDate);
+
+      deadline.setHours(0, 0, 0, 0);
+
+      const daysLeft =
+        Math.round(
+          (deadline - today) / 86400000
+        );
+
+      if (daysLeft > 1) {
+        continue;
+      }
+
+      const person =
+        findFreelancer(task.freelancerId);
+
+      const eventType =
+        daysLeft < 0
+          ? "deadline-overdue"
+          : "deadline-due";
+
+      const subject =
+        daysLeft < 0
+          ? `Deadline overdue: ${getTaskType(task)}`
+          : `Deadline reminder: ${getTaskType(task)}`;
+
+      const body =
+        [
+          `Hi ${person?.name || ""},`,
+          "",
+          daysLeft < 0
+            ? "This task is past its deadline."
+            : daysLeft === 0
+              ? "This task is due today."
+              : "This task is due tomorrow.",
+          "",
+          buildTaskDetails(task),
+          "",
+          `Thanks,`,
+          state.emailSettings.senderName
+        ].join("\n");
+
+      await sendFreelancerEmail({
+        freelancer: person,
+        subject,
+        body,
+        eventKey: `${eventType}-${task.id}-${task.deadlineDate}`,
+        silent: true
+      });
+    }
+
+  } finally {
+    deadlineEmailQueueRunning = false;
+  }
 }
 
 function findFreelancer(id) {
