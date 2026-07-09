@@ -1213,6 +1213,226 @@ box-shadow:var(--shadow-md);
   font-weight:700;
 }
 
+.section-subtitle{
+  margin:4px 0 0;
+  color:var(--muted);
+}
+
+#activeProfileSelect{
+  min-height:40px;
+  max-width:260px;
+  padding:0 12px;
+  border-radius:8px;
+}
+
+.welcome-user{
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  padding:0 12px;
+  border:1px solid #cbd5e1;
+  border-radius:8px;
+  background:#ffffff;
+  color:var(--ink);
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.team-layout,
+.reports-layout{
+  display:grid;
+  grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);
+  gap:18px;
+}
+
+.team-tree,
+.report-list,
+.role-controls{
+  display:grid;
+  gap:12px;
+}
+
+.team-node{
+  padding:14px;
+  border:1px solid #e2e8f0;
+  border-left:4px solid var(--info);
+  border-radius:8px;
+  background:#fff;
+}
+
+.team-node.role-admin{ border-left-color:#0f172a; }
+.team-node.role-manager{ border-left-color:#2563eb; }
+.team-node.role-associate{ border-left-color:#0f766e; }
+.team-node.role-executive{ border-left-color:#f59e0b; }
+
+.team-node p{
+  margin:6px 0;
+  color:var(--muted);
+}
+
+.team-profile-btn{
+  padding:0;
+  font-size:16px;
+  font-weight:800;
+}
+
+.team-children{
+  display:grid;
+  gap:10px;
+  margin-top:12px;
+  padding-left:18px;
+  border-left:1px dashed #cbd5e1;
+}
+
+.team-stats{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.control-tile{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  padding:14px;
+  border:1px solid #e2e8f0;
+  border-radius:8px;
+  background:#fff;
+}
+
+.control-tile span{
+  color:var(--muted);
+}
+
+.report-card{
+  padding:14px;
+  border:1px solid #e2e8f0;
+  border-radius:8px;
+  background:#fff;
+}
+
+.report-card.missing{
+  border-color:#f59e0b;
+  background:#fffbeb;
+}
+
+.approval-card{
+  display:grid;
+  gap:12px;
+}
+
+.approval-actions{
+  display:grid;
+  grid-template-columns:minmax(120px,150px) minmax(160px,240px) 96px 86px;
+  gap:10px;
+  align-items:center;
+}
+
+.approval-actions .primary-btn,
+.approval-actions .danger-btn{
+  width:100%;
+  min-height:40px;
+  padding:0 12px;
+}
+
+.approval-reports-to{
+  max-width:240px;
+}
+
+.report-card header{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+
+.report-card h4{
+  margin:0;
+}
+
+.report-card span,
+.missing-text{
+  color:var(--muted);
+}
+
+.report-card dl,
+.profile-grid dl{
+  display:grid;
+  grid-template-columns:130px 1fr;
+  gap:8px 12px;
+  margin:0;
+}
+
+.report-card dt,
+.profile-grid dt{
+  color:var(--muted);
+  font-weight:700;
+}
+
+.report-card dd,
+.profile-grid dd{
+  margin:0;
+}
+
+.profile-modal{
+  width:min(880px,calc(100vw - 32px));
+}
+
+.profile-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:16px;
+}
+
+.profile-grid article,
+.profile-section{
+  padding:14px;
+  border:1px solid #e2e8f0;
+  border-radius:8px;
+  background:#fff;
+}
+
+.profile-section{
+  margin-top:16px;
+}
+
+.profile-row{
+  width:100%;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  min-height:42px;
+  padding:10px 12px;
+  border:1px solid #e2e8f0;
+  border-radius:8px;
+  background:#fff;
+  text-align:left;
+}
+
+.profile-row + .profile-row{
+  margin-top:8px;
+}
+
+.warning{
+  background:#fef3c7;
+  color:#92400e;
+}
+
+@media (max-width: 900px){
+  .team-layout,
+  .reports-layout,
+  .profile-grid,
+  .approval-actions{
+    grid-template-columns:1fr;
+  }
+
+  .top-actions{
+    flex-wrap:wrap;
+  }
+}
+
 .health-healthy{
   color:#16a34a;
   font-weight:700;

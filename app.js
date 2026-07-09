@@ -5,15 +5,63 @@ const SUPABASE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkcmlteGdxeXRmcHJwaGhhemdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjE2NzAsImV4cCI6MjA5NjMzNzY3MH0.ycOW16LmqGZny6cTBgQg4lQ_XKQXtBu6sXsFDRnHsFo";
 
 const supabaseClient =
-  supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-  );
+  window.supabase?.createClient
+    ? window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    )
+    : createLocalSupabaseFallback();
 
 const EMAIL_FUNCTION_NAME = "send-email";
 
   const STORAGE_KEY = "freelancer-management-system-v1";
 const SESSION_KEY = "freelancer-management-session-v1";
+const SESSION_EMAIL_KEY = "freelancer-management-session-email-v1";
+const SESSION_NAME_KEY = "freelancer-management-session-name-v1";
+
+const roleOrder = ["admin", "manager", "associate", "executive"];
+const roleLabels = {
+  admin: "Admin",
+  manager: "Manager",
+  associate: "Associate",
+  executive: "Executive"
+};
+const reportRequiredRoles = ["associate", "executive"];
+
+function createLocalSupabaseFallback() {
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null } }),
+      signInWithPassword: async ({ email }) => ({
+        data: {
+          user: {
+            id: "local-demo-user",
+            email
+          }
+        },
+        error: null
+      }),
+      signUp: async ({ email }) => ({
+        data: {
+          user: {
+            id: "local-demo-user",
+            email
+          }
+        },
+        error: null
+      }),
+      signOut: async () => ({ error: null }),
+      resetPasswordForEmail: async () => ({ error: null })
+    },
+    functions: {
+      invoke: async () => ({ data: { ok: true, local: true }, error: null })
+    }
+  };
+}
+
+function isLocalPreview() {
+  return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+}
 
 
   supabaseClient.auth.getSession()
@@ -21,12 +69,7 @@ const SESSION_KEY = "freelancer-management-session-v1";
 
   if (data.session) {
 
-    sessionStorage.setItem(
-      SESSION_KEY,
-      data.session.user.id
-    );
-
-    updateAuthView();
+    applyLoggedInUser(data.session.user);
     queueDeadlineEmails();
 
   }
@@ -37,18 +80,64 @@ const statuses = ["Briefed", "In Progress", "Review", "Rework", "Completed"];
 const taskTypes = ["Transcription QC", "Audio QC", "Annotation", "Speech Recording", "Image QC", "Others"];
 
 const demoState = {
+  currentProfileId: "user-admin",
+  approvalRequests: [],
+  profiles: [
+    {
+      id: "user-admin",
+      name: "Vishal",
+      email: "vishal4exams@gmail.com",
+      role: "admin",
+      reportsTo: ""
+    },
+    {
+      id: "user-manager-1",
+      name: "Operations Manager",
+      email: "manager@yourdomain.com",
+      role: "manager",
+      reportsTo: "user-admin"
+    },
+    {
+      id: "user-associate-1",
+      name: "Associate Lead",
+      email: "associate@yourdomain.com",
+      role: "associate",
+      reportsTo: "user-manager-1"
+    },
+    {
+      id: "user-executive-1",
+      name: "Executive Desk",
+      email: "executive@yourdomain.com",
+      role: "executive",
+      reportsTo: "user-manager-1"
+    }
+  ],
   operations: [],
   freelancers: [
     {
       id: "fr-1",
+      ownerId: "user-associate-1",
       name: "Aarav Mehta",
       email: "aarav.mehta@example.com",
+      mobile: "919999999999",
       role: "UI Designer",
       state: "Maharashtra",
       district: "Pune",
       language: "Marathi, Hindi",
       rate: "$45/hr",
       status: "Available"
+    }
+  ],
+  dailyReports: [
+    {
+      id: "report-1",
+      userId: "user-associate-1",
+      date: new Date().toISOString().slice(0, 10),
+      todayWork: "Reviewed active freelancer assignments and followed up on pending QC.",
+      tomorrowPlan: "Close review batches and redistribute delayed work.",
+      roadblocks: "Awaiting one client clarification.",
+      filesReviewed: 42,
+      createdAt: new Date().toISOString()
     }
   ],
   tasks: [
@@ -121,6 +210,17 @@ const els = {
   emailBody: document.getElementById("emailBody"),
   senderName: document.getElementById("senderName"),
   senderEmail: document.getElementById("senderEmail"),
+  welcomeUser: document.getElementById("welcomeUser"),
+  approvalPanel: document.getElementById("approvalPanel"),
+  approvalList: document.getElementById("approvalList"),
+  approvalBadge: document.getElementById("approvalBadge"),
+  teamTree: document.getElementById("teamTree"),
+  roleControls: document.getElementById("roleControls"),
+  dailyReportForm: document.getElementById("dailyReportForm"),
+  dailyReportList: document.getElementById("dailyReportList"),
+  missingReportBadge: document.getElementById("missingReportBadge"),
+  freelancerOwnerSelect: document.getElementById("freelancerOwnerSelect"),
+  employeeReportsToSelect: document.getElementById("employeeReportsToSelect"),
   loginScreen: document.getElementById("loginScreen"),
   appShell: document.getElementById("appShell"),
   toast: document.getElementById("toast")
@@ -142,14 +242,23 @@ document.getElementById("loginForm")
     document.getElementById("loginPassword")
       .value;
 
-  const { data, error } =
+  let { data, error } =
     await supabaseClient.auth.signInWithPassword({
       email,
       password
     });
 
-    console.log("LOGIN DATA", data);
-console.log("LOGIN ERROR", error);
+  if (error) {
+    if (isLocalPreview()) {
+      data = {
+        user: {
+          id: "local-demo-user",
+          email
+        }
+      };
+      error = null;
+    }
+  }
 
   if (error) {
 
@@ -158,21 +267,12 @@ console.log("LOGIN ERROR", error);
 
   }
 
-sessionStorage.setItem(
-  SESSION_KEY,
-  data.user.id
-);
+  if (!applyLoggedInUser(data.user)) {
+    return;
+  }
 
-document
-  .getElementById("loginScreen")
-  .style.display = "none";
-
-document
-  .getElementById("appShell")
-  .style.display = "grid";
-
-toast("Login successful.");
-queueDeadlineEmails();
+  toast("Login successful.");
+  queueDeadlineEmails();
 
 });
 
@@ -193,7 +293,7 @@ document.getElementById("signupForm")
     document.getElementById("signupPassword")
       .value;
 
-  const { data, error } =
+  let { data, error } =
     await supabaseClient.auth.signUp({
       email,
       password,
@@ -205,14 +305,32 @@ document.getElementById("signupForm")
     });
 
   if (error) {
+    if (isLocalPreview()) {
+      data = {
+        user: {
+          id: uid("auth"),
+          email
+        }
+      };
+      error = null;
+    }
+  }
+
+  if (error) {
 
     toast(error.message);
     return;
 
   }
 
+  createApprovalRequest({
+    name,
+    email,
+    authUserId: data?.user?.id || ""
+  });
+
   toast(
-    "Account created. Check your email."
+    "Signup request sent to admin for approval."
   );
 
   document
@@ -266,6 +384,8 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
   await supabaseClient.auth.signOut();
 
   sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_EMAIL_KEY);
+  sessionStorage.removeItem(SESSION_NAME_KEY);
 
   updateAuthView();
 
@@ -278,9 +398,32 @@ document.getElementById("openTaskModalBtn").addEventListener("click", () => {
 
 document.getElementById("openFreelancerModalBtn").addEventListener("click", () => {
   document.getElementById("freelancerForm").reset();
+  document.getElementById("freelancerId").value = "";
+  renderFreelancerOwnerSelect();
   document.getElementById("freelancerModal").showModal();
 });
 
+document.getElementById("openEmployeeModalBtn")?.addEventListener("click", () => {
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can assign roles.");
+    return;
+  }
+
+  document.getElementById("employeeForm").reset();
+  document.getElementById("employeeId").value = "";
+  renderEmployeeReportsToSelect();
+  document.getElementById("employeeModal").showModal();
+});
+
+document.getElementById("checkMissingReportsBtn")?.addEventListener("click", () => {
+  const missing = getMissingDailyReports();
+  toast(
+    missing.length
+      ? `${missing.length} team member(s) have not filled today's report.`
+      : "Everyone visible has filled today's report."
+  );
+  renderDailyReports();
+});
 
 document.getElementById("saveTemplateBtn").addEventListener("click", () => {
   state.emailSettings.senderName = els.senderName.value;
@@ -379,6 +522,87 @@ document
   document.getElementById("freelancerModal").close();
 });
 
+document.getElementById("employeeForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can assign roles.");
+    return;
+  }
+
+  const data = Object.fromEntries(
+    new FormData(event.currentTarget)
+  );
+
+  if (!data.reportsTo && data.role !== "admin") {
+    toast("Select who this employee reports to.");
+    return;
+  }
+
+  if (data.id) {
+    const index = state.profiles.findIndex(profile => profile.id === data.id);
+    state.profiles[index] = {
+      ...state.profiles[index],
+      ...data
+    };
+    toast("Employee updated.");
+  } else {
+    state.profiles.push({
+      id: uid("user"),
+      ...data
+    });
+    toast("Employee added.");
+  }
+
+  saveState();
+  render();
+  document.getElementById("employeeModal").close();
+});
+
+els.dailyReportForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const data = Object.fromEntries(
+    new FormData(event.currentTarget)
+  );
+
+  const profile = getCurrentProfile();
+
+  if (!isReportRequiredProfile(profile)) {
+    toast("Only associates and executives submit EOD reports.");
+    return;
+  }
+
+  const existing = state.dailyReports.find(
+    report => report.userId === profile.id && report.date === data.date
+  );
+
+  const reportData = {
+    userId: profile.id,
+    date: data.date,
+    todayWork: data.todayWork,
+    tomorrowPlan: data.tomorrowPlan,
+    roadblocks: data.roadblocks || "None",
+    filesReviewed: Number(data.filesReviewed || 0),
+    createdAt: new Date().toISOString()
+  };
+
+  if (existing) {
+    Object.assign(existing, reportData);
+    toast("Daily report updated.");
+  } else {
+    state.dailyReports.push({
+      id: uid("report"),
+      ...reportData
+    });
+    toast("Daily report submitted.");
+  }
+
+  saveState();
+  renderDailyReports();
+  renderTeam();
+});
+
 document.getElementById("taskForm").addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -403,6 +627,7 @@ document.getElementById("taskForm").addEventListener("submit", async (event) => 
       state.tasks[index] = {
         ...state.tasks[index],
         ...data,
+        ownerId: findFreelancer(data.freelancerId)?.ownerId || state.tasks[index].ownerId || getCurrentProfile().id,
         taskCount: Number(data.taskCount)
       };
 
@@ -421,6 +646,7 @@ document.getElementById("taskForm").addEventListener("submit", async (event) => 
       operationId: data.operationId,
       taskType: data.taskType,
       freelancerId: data.freelancerId,
+      ownerId: findFreelancer(data.freelancerId)?.ownerId || getCurrentProfile().id,
       startDate: data.startDate,
       deadlineDate: data.deadlineDate,
       taskCount: Number(data.taskCount),
@@ -454,6 +680,7 @@ els.taskFreelancerFilter.addEventListener("change", renderTasks);
 els.taskTypeFilter.addEventListener("change", renderTasks);
 els.taskStatusFilter.addEventListener("change", renderTasks);
 els.globalSearch.addEventListener("input", render);
+document.getElementById("taskSearch")?.addEventListener("input", renderTasks);
  document.getElementById("freelancerSearch")
   ?.addEventListener("input", renderFreelancers);
 
@@ -496,9 +723,63 @@ function normalizeState(nextState = {}) {
     ? nextState.operations
     : [];
 
+  normalized.profiles = Array.isArray(nextState.profiles)
+    ? nextState.profiles.map(profile => ({
+      ...profile,
+      role: profile.role || "executive",
+      reportsTo: profile.reportsTo || "",
+      status: profile.status || "active"
+    }))
+    : clone(demoState.profiles);
+
+  normalized.approvalRequests = Array.isArray(nextState.approvalRequests)
+    ? nextState.approvalRequests.map(request => ({
+      ...request,
+      status: request.status || "pending",
+      createdAt: request.createdAt || new Date().toISOString()
+    }))
+    : [];
+
+  if (!normalized.profiles.some(profile => profile.role === "admin")) {
+    normalized.profiles.unshift(clone(demoState.profiles[0]));
+  }
+
+  const seededAdmin = normalized.profiles.find(profile => profile.id === "user-admin");
+  if (seededAdmin?.name === "Admin User") {
+    seededAdmin.name = "Vishal";
+  }
+  if (seededAdmin && sameEmail(seededAdmin.email, "admin@yourdomain.com")) {
+    seededAdmin.email = "vishal4exams@gmail.com";
+  }
+
+  const seededExecutive = normalized.profiles.find(profile => profile.id === "user-executive-1");
+  if (seededExecutive?.reportsTo === "user-associate-1") {
+    seededExecutive.reportsTo = "user-manager-1";
+  }
+
+  const fallbackOwner =
+    normalized.profiles.find(profile => profile.role === "associate")?.id ||
+    normalized.profiles.find(profile => profile.role === "executive")?.id ||
+    normalized.profiles[0]?.id ||
+    "user-admin";
+
+  normalized.currentProfileId =
+    normalized.profiles.find(profile =>
+      sameEmail(profile.email, sessionStorage.getItem(SESSION_EMAIL_KEY))
+    )?.id ||
+    nextState.currentProfileId ||
+    normalized.profiles[0]?.id ||
+    "user-admin";
+
+  if (!normalized.profiles.some(profile => profile.id === normalized.currentProfileId)) {
+    normalized.currentProfileId = normalized.profiles[0]?.id || "user-admin";
+  }
+
   normalized.freelancers = Array.isArray(nextState.freelancers)
     ? nextState.freelancers.map(person => ({
       ...person,
+      ownerId: person.ownerId || fallbackOwner,
+      mobile: person.mobile || "",
       state: person.state || "",
       district: person.district || "",
       language: person.language || ""
@@ -525,6 +806,7 @@ function normalizeState(nextState = {}) {
   normalized.tasks = Array.isArray(nextState.tasks)
     ? nextState.tasks.map((task) => ({
     ...task,
+    ownerId: task.ownerId || normalized.freelancers.find(person => person.id === task.freelancerId)?.ownerId || fallbackOwner,
     taskType: task.taskType || "Others",
     taskCount: Number(task.taskCount || 1),
     payPerTask: Number(task.payPerTask ?? task.amount ?? 0),
@@ -535,6 +817,14 @@ function normalizeState(nextState = {}) {
 
   normalized.notifications = Array.isArray(nextState.notifications)
     ? nextState.notifications
+    : [];
+
+  normalized.dailyReports = Array.isArray(nextState.dailyReports)
+    ? nextState.dailyReports.map(report => ({
+      ...report,
+      roadblocks: report.roadblocks || "None",
+      filesReviewed: Number(report.filesReviewed || 0)
+    }))
     : [];
 
   normalized.emailEvents =
@@ -586,6 +876,103 @@ function setAuthMode(mode) {
   document.getElementById("showLoginBtn").classList.toggle("active", !isSignup);
 }
 
+function sameEmail(left, right) {
+  return String(left || "").trim().toLowerCase() ===
+    String(right || "").trim().toLowerCase();
+}
+
+function getUserNameFromAuth(user) {
+  return user?.user_metadata?.name ||
+    user?.user_metadata?.full_name ||
+    user?.email?.split("@")[0] ||
+    "User";
+}
+
+function findApprovedProfileByEmail(email) {
+  return state.profiles.find(profile =>
+    profile.status !== "pending" && sameEmail(profile.email, email)
+  );
+}
+
+function findPendingApprovalByEmail(email) {
+  return state.approvalRequests.find(request =>
+    request.status === "pending" && sameEmail(request.email, email)
+  );
+}
+
+function createApprovalRequest({ name, email, authUserId = "" }) {
+  const existingProfile = findApprovedProfileByEmail(email);
+
+  if (existingProfile) {
+    return existingProfile;
+  }
+
+  const existingRequest = findPendingApprovalByEmail(email);
+
+  if (existingRequest) {
+    existingRequest.name = name || existingRequest.name;
+    existingRequest.authUserId = authUserId || existingRequest.authUserId;
+    saveState();
+    return existingRequest;
+  }
+
+  const request = {
+    id: uid("approval"),
+    authUserId,
+    name: name || email.split("@")[0],
+    email,
+    status: "pending",
+    requestedRole: "",
+    reportsTo: "",
+    createdAt: new Date().toISOString()
+  };
+
+  state.approvalRequests.push(request);
+  state.notifications.push({
+    id: uid("note"),
+    type: "Signup approval",
+    message: `${request.name} requested access and needs role assignment.`,
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
+  saveState();
+  renderApprovalRequests();
+  renderNotifications();
+
+  return request;
+}
+
+function applyLoggedInUser(user) {
+  const email = user?.email || "";
+  const name = getUserNameFromAuth(user);
+  const profile = findApprovedProfileByEmail(email);
+
+  if (!profile) {
+    createApprovalRequest({
+      name,
+      email,
+      authUserId: user?.id || ""
+    });
+
+    sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_EMAIL_KEY);
+    sessionStorage.removeItem(SESSION_NAME_KEY);
+    updateAuthView();
+    toast("Your account is pending admin approval and role assignment.");
+    return false;
+  }
+
+  state.currentProfileId = profile.id;
+  sessionStorage.setItem(SESSION_KEY, user?.id || profile.id);
+  sessionStorage.setItem(SESSION_EMAIL_KEY, profile.email);
+  sessionStorage.setItem(SESSION_NAME_KEY, profile.name);
+  saveState();
+  render();
+  updateAuthView();
+  return true;
+}
+
 function uid(prefix) {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
     return `${prefix}-${window.crypto.randomUUID()}`;
@@ -602,12 +989,145 @@ function setView(view) {
   els.views.forEach((section) => section.classList.toggle("active", section.id === `${view}-view`));
 }
 
+function getCurrentProfile() {
+  return state.profiles.find(profile => profile.id === state.currentProfileId) ||
+    state.profiles[0] ||
+    demoState.profiles[0];
+}
+
+function getReportsToOptions(role) {
+  const reportsToRole = {
+    manager: "admin",
+    associate: "manager",
+    executive: "manager"
+  }[role];
+
+  return state.profiles.filter(profile =>
+    profile.role === reportsToRole
+  );
+}
+
+function getDescendantProfileIds(profileId) {
+  const ids = new Set([profileId]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    state.profiles.forEach(profile => {
+      if (profile.reportsTo && ids.has(profile.reportsTo) && !ids.has(profile.id)) {
+        ids.add(profile.id);
+        changed = true;
+      }
+    });
+  }
+
+  return [...ids];
+}
+
+function getVisibleProfileIds() {
+  const profile = getCurrentProfile();
+
+  if (profile.role === "admin") {
+    return state.profiles.map(item => item.id);
+  }
+
+  return getDescendantProfileIds(profile.id);
+}
+
+function canManageProfile(profile) {
+  const current = getCurrentProfile();
+  if (!profile) return false;
+  if (current.role === "admin") return true;
+  return getDescendantProfileIds(current.id).includes(profile.id) && current.id !== profile.id;
+}
+
+function getVisibleProfiles() {
+  const ids = new Set(getVisibleProfileIds());
+  return state.profiles.filter(profile => ids.has(profile.id));
+}
+
+function getAssignableFreelancerOwners() {
+  const current = getCurrentProfile();
+  const visible = getVisibleProfiles();
+
+  return visible.filter(profile => {
+    if (!["manager", "associate", "executive"].includes(profile.role)) return false;
+    if (current.role === "executive") return profile.id === current.id;
+    return true;
+  });
+}
+
+function getScopedFreelancers() {
+  const visibleIds = new Set(getVisibleProfileIds());
+  return state.freelancers.filter(person => visibleIds.has(person.ownerId));
+}
+
+function getScopedTasks() {
+  const freelancerIds = new Set(getScopedFreelancers().map(person => person.id));
+  return state.tasks.filter(task => freelancerIds.has(task.freelancerId));
+}
+
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getReportFor(profileId, date = getTodayKey()) {
+  return state.dailyReports.find(report =>
+    report.userId === profileId && report.date === date
+  );
+}
+
+function isReportRequiredProfile(profile) {
+  return reportRequiredRoles.includes(profile?.role);
+}
+
+function canReviewReports(profile = getCurrentProfile()) {
+  return ["admin", "manager"].includes(profile?.role);
+}
+
+function getReviewableReportProfiles() {
+  const current = getCurrentProfile();
+
+  if (!canReviewReports(current)) {
+    return [];
+  }
+
+  return getVisibleProfiles()
+    .filter(profile => profile.id !== current.id)
+    .filter(isReportRequiredProfile);
+}
+
+function getMissingDailyReports(date = getTodayKey()) {
+  return getReviewableReportProfiles()
+    .filter(profile => !getReportFor(profile.id, date));
+}
+
+function getProfileName(profileId) {
+  return state.profiles.find(profile => profile.id === profileId)?.name || "Unassigned";
+}
+
+function renderWelcomeUser() {
+  if (!els.welcomeUser) return;
+
+  const profile = getCurrentProfile();
+  els.welcomeUser.textContent =
+    `Welcome ${profile.name || sessionStorage.getItem(SESSION_NAME_KEY) || "User"}`;
+  els.welcomeUser.title = roleLabels[profile.role] || profile.role || "";
+}
+
 function render() {
+  renderWelcomeUser();
+  renderRoleAssignmentAccess();
+  renderApprovalRequests();
   renderMetrics();
+  renderTeam();
+  renderDailyReports();
   renderOperations();
   renderOperationTaskTypes();
   renderFreelancers();
   renderTaskSelectors();
+  renderFreelancerOwnerSelect();
   renderOperationSelectors();
   renderTasks();
   renderPayments();
@@ -621,20 +1141,45 @@ function render() {
   queueDeadlineEmails();
 }
 
+function renderRoleAssignmentAccess() {
+  const addEmployeeButton = document.getElementById("openEmployeeModalBtn");
+  const checkReportsButton = document.getElementById("checkMissingReportsBtn");
+  const reportReviewPanel = document.getElementById("reportReviewPanel");
+  const current = getCurrentProfile();
+  const isAdmin = current.role === "admin";
+
+  if (addEmployeeButton) {
+    addEmployeeButton.hidden = !isAdmin;
+  }
+
+  if (els.approvalPanel) {
+    els.approvalPanel.hidden = !isAdmin;
+  }
+
+  if (checkReportsButton) {
+    checkReportsButton.hidden = !canReviewReports(current);
+  }
+
+  if (reportReviewPanel) {
+    reportReviewPanel.hidden = !canReviewReports(current);
+  }
+}
+
 function populateFreelancerFilters() {
+  const scopedFreelancers = getScopedFreelancers();
 
   const states =
-    [...new Set(state.freelancers.map(f => f.state))]
+    [...new Set(scopedFreelancers.map(f => f.state))]
       .filter(Boolean)
       .sort();
 
   const districts =
-    [...new Set(state.freelancers.map(f => f.district))]
+    [...new Set(scopedFreelancers.map(f => f.district))]
       .filter(Boolean)
       .sort();
 
   const languages =
-    [...new Set(state.freelancers.map(f => f.language))]
+    [...new Set(scopedFreelancers.map(f => f.language))]
       .filter(Boolean)
       .sort();
 
@@ -657,10 +1202,315 @@ function populateFreelancerFilters() {
     ).join("");
 }
 
+function renderTeam() {
+  if (!els.teamTree || !els.roleControls) return;
+
+  const current = getCurrentProfile();
+  const showReportStatus = canReviewReports(current);
+  const visibleIds = new Set(getVisibleProfileIds());
+  const visibleProfiles = state.profiles.filter(profile => visibleIds.has(profile.id));
+
+  const renderNode = (profile) => {
+    const children = state.profiles
+      .filter(child => child.reportsTo === profile.id && visibleIds.has(child.id))
+      .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+
+    const report = getReportFor(profile.id);
+    const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id).length;
+    const filesReviewed = report ? Number(report.filesReviewed || 0) : 0;
+    const reportStatus = !showReportStatus
+      ? "Activity visible"
+      : isReportRequiredProfile(profile)
+      ? report
+        ? `${filesReviewed} files today`
+        : "Report missing"
+      : "Reviews team reports";
+
+    return `
+      <article class="team-node role-${escapeHtml(profile.role)}">
+        <div>
+          <button class="link-btn team-profile-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
+            ${escapeHtml(profile.name)}
+          </button>
+          <span class="pill">${escapeHtml(roleLabels[profile.role] || profile.role)}</span>
+        </div>
+        <p>${escapeHtml(profile.email || "")}</p>
+        <div class="team-stats">
+          <span>${ownFreelancers} freelancers</span>
+          <span>${reportStatus}</span>
+        </div>
+        ${children.length ? `<div class="team-children">${children.map(renderNode).join("")}</div>` : ""}
+      </article>
+    `;
+  };
+
+  const roots = visibleProfiles
+    .filter(profile => profile.id === current.id || !visibleIds.has(profile.reportsTo))
+    .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+
+  els.teamTree.innerHTML = roots.length
+    ? roots.map(renderNode).join("")
+    : `<div class="empty">No visible team members.</div>`;
+
+  const controls = [
+    ["Active role", roleLabels[current.role] || current.role],
+    ["Visible activity", visibleProfiles.length],
+    ["Freelancer access", getScopedFreelancers().length],
+    ["Assignment access", getScopedTasks().length],
+    ["Missing reports today", getMissingDailyReports().length]
+  ];
+
+  els.roleControls.innerHTML = controls.map(([label, value]) => `
+    <article class="control-tile">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </article>
+  `).join("");
+}
+
+function renderEmployeeReportsToSelect() {
+  if (!els.employeeReportsToSelect) return;
+
+  const role = document.getElementById("employeeRoleSelect")?.value || "manager";
+  const options = getReportsToOptions(role);
+
+  els.employeeReportsToSelect.innerHTML =
+    `<option value="">Select reporting head</option>` +
+    options.map(profile => `
+      <option value="${profile.id}">
+        ${escapeHtml(profile.name)} (${escapeHtml(roleLabels[profile.role] || profile.role)})
+      </option>
+    `).join("");
+}
+
+document.getElementById("employeeRoleSelect")?.addEventListener("change", renderEmployeeReportsToSelect);
+
+function renderApprovalReportsToSelect(requestId) {
+  const roleSelect = document.getElementById(`approvalRole-${requestId}`);
+  const reportsToSelect = document.getElementById(`approvalReportsTo-${requestId}`);
+
+  if (!roleSelect || !reportsToSelect) return;
+
+  const options = getReportsToOptions(roleSelect.value);
+  reportsToSelect.innerHTML =
+    `<option value="">Reports to</option>` +
+    options.map(profile => `
+      <option value="${profile.id}">
+        ${escapeHtml(profile.name)} (${escapeHtml(roleLabels[profile.role] || profile.role)})
+      </option>
+    `).join("");
+}
+
+function renderApprovalRequests() {
+  if (!els.approvalList || !els.approvalBadge) return;
+
+  const pending = state.approvalRequests
+    .filter(request => request.status === "pending")
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  els.approvalBadge.textContent = `${pending.length} pending`;
+
+  if (getCurrentProfile().role !== "admin") {
+    els.approvalList.innerHTML = "";
+    return;
+  }
+
+  els.approvalList.innerHTML = pending.length
+    ? pending.map(request => `
+      <article class="report-card approval-card">
+        <header>
+          <div>
+            <h4>${escapeHtml(request.name)}</h4>
+            <span>${escapeHtml(request.email)}</span>
+          </div>
+          <span>${formatDateTime(request.createdAt)}</span>
+        </header>
+        <div class="approval-actions">
+          <select id="approvalRole-${request.id}" onchange="renderApprovalReportsToSelect('${request.id}')">
+            <option value="manager">Manager</option>
+            <option value="associate">Associate</option>
+            <option value="executive">Executive</option>
+          </select>
+          <select class="approval-reports-to" id="approvalReportsTo-${request.id}"></select>
+          <button class="primary-btn" type="button" onclick="approveSignupRequest('${request.id}')">
+            Approve
+          </button>
+          <button class="danger-btn" type="button" onclick="denySignupRequest('${request.id}')">
+            Deny
+          </button>
+        </div>
+      </article>
+    `).join("")
+    : `<div class="empty">No pending signup approvals.</div>`;
+
+  pending.forEach(request => renderApprovalReportsToSelect(request.id));
+}
+
+function approveSignupRequest(requestId) {
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can approve users.");
+    return;
+  }
+
+  const request = state.approvalRequests.find(item => item.id === requestId);
+  const role = document.getElementById(`approvalRole-${requestId}`)?.value || "";
+  const reportsTo = document.getElementById(`approvalReportsTo-${requestId}`)?.value || "";
+
+  if (!request) return;
+
+  if (!role || !reportsTo) {
+    toast("Select role and reporting head before approval.");
+    return;
+  }
+
+  const existingProfile = findApprovedProfileByEmail(request.email);
+
+  if (existingProfile) {
+    request.status = "approved";
+    toast("This user is already approved.");
+    saveState();
+    render();
+    return;
+  }
+
+  state.profiles.push({
+    id: request.authUserId || uid("user"),
+    name: request.name,
+    email: request.email,
+    role,
+    reportsTo,
+    status: "active"
+  });
+
+  request.status = "approved";
+  request.approvedAt = new Date().toISOString();
+  request.approvedBy = getCurrentProfile().id;
+  request.requestedRole = role;
+  request.reportsTo = reportsTo;
+
+  state.notifications.push({
+    id: uid("note"),
+    type: "User approved",
+    message: `${request.name} approved as ${roleLabels[role] || role}.`,
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
+  saveState();
+  render();
+  toast(`${request.name} approved.`);
+}
+
+function denySignupRequest(requestId) {
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can deny users.");
+    return;
+  }
+
+  const request = state.approvalRequests.find(item => item.id === requestId);
+
+  if (!request) return;
+
+  request.status = "denied";
+  request.deniedAt = new Date().toISOString();
+  request.deniedBy = getCurrentProfile().id;
+
+  state.notifications.push({
+    id: uid("note"),
+    type: "User denied",
+    message: `${request.name} signup request denied.`,
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
+  saveState();
+  render();
+  toast(`${request.name} denied.`);
+}
+
+function renderFreelancerOwnerSelect(selectedOwnerId = "") {
+  if (!els.freelancerOwnerSelect) return;
+
+  const owners = getAssignableFreelancerOwners();
+  const fallback = selectedOwnerId || owners[0]?.id || getCurrentProfile().id;
+
+  els.freelancerOwnerSelect.innerHTML = owners.map(profile => `
+    <option value="${profile.id}" ${profile.id === fallback ? "selected" : ""}>
+      ${escapeHtml(profile.name)} (${escapeHtml(roleLabels[profile.role] || profile.role)})
+    </option>
+  `).join("");
+}
+
+function renderDailyReports() {
+  if (!els.dailyReportForm || !els.dailyReportList) return;
+
+  const today = getTodayKey();
+  const current = getCurrentProfile();
+  const currentReport = getReportFor(current.id, today);
+  const submitPanel = document.getElementById("dailyReportSubmitPanel");
+  const canSubmitReport = isReportRequiredProfile(current);
+
+  if (submitPanel) {
+    submitPanel.hidden = !canSubmitReport;
+  }
+
+  if (canSubmitReport) {
+    document.getElementById("reportDate").value = currentReport?.date || today;
+    document.getElementById("todayWork").value = currentReport?.todayWork || "";
+    document.getElementById("tomorrowPlan").value = currentReport?.tomorrowPlan || "";
+    document.getElementById("roadblocks").value = currentReport?.roadblocks || "";
+    document.getElementById("filesReviewed").value = currentReport?.filesReviewed ?? "";
+  }
+
+  const visibleProfiles = getReviewableReportProfiles();
+
+  const rows = visibleProfiles.map(profile => {
+    const report = getReportFor(profile.id, today);
+
+    return `
+      <article class="report-card ${report ? "" : "missing"}">
+        <header>
+          <div>
+            <h4>${escapeHtml(profile.name)}</h4>
+            <span>${escapeHtml(roleLabels[profile.role] || profile.role)}</span>
+          </div>
+          <button class="link-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
+            Open profile
+          </button>
+        </header>
+        ${report ? `
+          <dl>
+            <dt>Today's work</dt><dd>${escapeHtml(report.todayWork)}</dd>
+            <dt>Tomorrow</dt><dd>${escapeHtml(report.tomorrowPlan)}</dd>
+            <dt>Roadblocks</dt><dd>${escapeHtml(report.roadblocks || "None")}</dd>
+            <dt>Files reviewed</dt><dd>${Number(report.filesReviewed || 0)}</dd>
+          </dl>
+        ` : `<p class="missing-text">Today's report has not been filled.</p>`}
+      </article>
+    `;
+  });
+
+  const missingCount = getMissingDailyReports(today).length;
+  els.missingReportBadge.textContent = `${missingCount} missing`;
+  els.dailyReportList.innerHTML = rows.join("") || `<div class="empty">No EOD reports to review for this role.</div>`;
+}
+
+function getVisibleNotifications() {
+  const visibleFreelancerIds = new Set(getScopedFreelancers().map(person => person.id));
+  const adminOnlyTypes = new Set(["Signup approval", "User approved", "User denied"]);
+  const isAdmin = getCurrentProfile().role === "admin";
+
+  return state.notifications
+    .filter(note => !adminOnlyTypes.has(note.type) || isAdmin)
+    .filter(note => !note.freelancerId || visibleFreelancerIds.has(note.freelancerId));
+}
+
 function renderMetrics() {
+  const scopedFreelancers = getScopedFreelancers();
+  const scopedTasks = getScopedTasks();
 
   const unread =
-    state.notifications.filter(
+    getVisibleNotifications().filter(
       note => !note.read
     ).length;
 
@@ -712,11 +1562,11 @@ function renderMetrics() {
 ["Delayed", delayed],
 
 ["Assignments",
-state.tasks.length
+scopedTasks.length
 ],
 
 ["Freelancers",
-state.freelancers.length
+scopedFreelancers.length
 ],
 
 ["Unread Alerts",
@@ -759,7 +1609,7 @@ const statusFilter =
     ?.value || "all";
 
 const freelancers =
-  state.freelancers.filter(person => {
+  getScopedFreelancers().filter(person => {
 
     const matchesSearch =
       [
@@ -788,6 +1638,7 @@ const freelancers =
   els.freelancerGrid.innerHTML = freelancers.length
     ? freelancers.map((person) => {
         const activeTasks = state.tasks.filter((task) => task.freelancerId === person.id && task.status !== "Completed").length;
+        const ownerName = getProfileName(person.ownerId);
         return `
           <article class="freelancer-card">
             <header>
@@ -799,6 +1650,8 @@ const freelancers =
             </header>
             <dl>
               <dt>Email</dt><dd><a href="mailto:${encodeURIComponent(person.email)}">${escapeHtml(person.email)}</a></dd>
+              <dt>Mobile</dt><dd>${escapeHtml(person.mobile || "")}</dd>
+              <dt>Owner</dt><dd>${escapeHtml(ownerName)}</dd>
               <dt>State</dt><dd>${escapeHtml(person.state || "")}</dd>
               <dt>District</dt><dd>${escapeHtml(person.district || "")}</dd>
               <dt>Language</dt><dd>${escapeHtml(person.language || "")}</dd>
@@ -806,6 +1659,16 @@ const freelancers =
               <dt>Tasks</dt><dd>${activeTasks} active</dd>
             </dl>
             <div class="card-actions">
+  <button class="ghost-btn"
+          onclick="showFreelancerProfile('${person.id}')">
+    Profile
+  </button>
+
+  <button class="ghost-btn"
+          onclick="openFreelancerWhatsApp('${person.id}')">
+    WhatsApp
+  </button>
+
   <button class="ghost-btn"
           onclick="editFreelancer('${person.id}')">
     Edit
@@ -843,6 +1706,8 @@ function editFreelancer(id) {
 
   document.querySelector("[name='name']").value = person.name || "";
   document.querySelector("[name='email']").value = person.email || "";
+  document.querySelector("[name='mobile']").value = person.mobile || "";
+  renderFreelancerOwnerSelect(person.ownerId);
   document.querySelector("[name='role']").value = person.role || "";
   document.querySelector("[name='state']").value = person.state || "";
   document.querySelector("[name='district']").value = person.district || "";
@@ -854,7 +1719,7 @@ function editFreelancer(id) {
 }
 
 function renderTaskSelectors() {
-  const options = state.freelancers.map((person) => `<option value="${person.id}">${escapeHtml(person.name)} - ${escapeHtml(person.role)}</option>`).join("");
+  const options = getScopedFreelancers().map((person) => `<option value="${person.id}">${escapeHtml(person.name)} - ${escapeHtml(person.role)}</option>`).join("");
   els.taskFreelancerSelect.innerHTML =
   `<option value="">Select freelancer</option>${options}`;
   els.taskFreelancerFilter.innerHTML = `<option value="all">All freelancers</option>${options}`;
@@ -883,21 +1748,23 @@ function renderOperationSelectors() {
 }
 
 function renderTasks() {
-  const query = els.globalSearch.value.trim().toLowerCase();
+  const localTaskQuery = document.getElementById("taskSearch")?.value.trim().toLowerCase() || "";
+  const query = `${els.globalSearch.value.trim().toLowerCase()} ${localTaskQuery}`.trim();
   const freelancerFilter = els.taskFreelancerFilter.value || "all";
   const typeFilter = els.taskTypeFilter.value || "all";
   const statusFilter = els.taskStatusFilter.value || "all";
-  const filtered = state.tasks.filter((task) => {
+  const scopedTasks = getScopedTasks();
+  const filtered = scopedTasks.filter((task) => {
     const person = findFreelancer(task.freelancerId);
     const operation = findOperation(task.operationId);
-    const searchable = [getTaskLabel(task), task.brief, person?.name, person?.role].join(" ").toLowerCase();
+    const searchable = [getTaskLabel(task), task.brief, operation?.batchName, person?.name, person?.role].join(" ").toLowerCase();
     return searchable.includes(query)
       && (freelancerFilter === "all" || task.freelancerId === freelancerFilter)
       && (typeFilter === "all" || getTaskType(task) === typeFilter)
       && (statusFilter === "all" || task.status === statusFilter);
   });
   els.taskBoard.innerHTML = statuses.map((status) => renderColumn(status, filtered)).join("");
-  els.workflowPreview.innerHTML = statuses.map((status) => renderColumn(status, state.tasks, true)).join("");
+  els.workflowPreview.innerHTML = statuses.map((status) => renderColumn(status, scopedTasks, true)).join("");
   document.querySelectorAll("[data-task-status]").forEach((select) => {
     select.addEventListener("change", () => updateTask(select.dataset.taskStatus, { status: select.value }));
   });
@@ -946,6 +1813,16 @@ function renderTaskCard(task, compact) {
       <p>${escapeHtml(task.brief)}</p>
       <div class="task-actions">
   <button class="ghost-btn"
+          onclick="showFreelancerProfile('${task.freelancerId}')">
+    Freelancer
+  </button>
+
+  <button class="ghost-btn"
+          onclick="openTaskWhatsApp('${task.id}')">
+    WhatsApp
+  </button>
+
+  <button class="ghost-btn"
           onclick="editTask('${task.id}')">
     Edit
   </button>
@@ -967,6 +1844,10 @@ function editTask(id) {
 
   document.getElementById("taskId").value = task.id;
   renderTaskSelectors();
+  renderOperationSelectors();
+
+  document.querySelector("[name='operationId']").value =
+    task.operationId || "";
 
   document.querySelector("[name='taskType']").value =
     task.taskType;
@@ -990,7 +1871,7 @@ function editTask(id) {
 }
 
 function renderPayments() {
-  els.paymentRows.innerHTML = state.tasks.map((task) => {
+  els.paymentRows.innerHTML = getScopedTasks().map((task) => {
     const person = findFreelancer(task.freelancerId);
     const operation =
   findOperation(task.operationId);
@@ -1022,7 +1903,8 @@ function renderPayments() {
 }
 
 function renderNotifications() {
-  const sorted = [...state.notifications].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const sorted = getVisibleNotifications()
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   els.recentNotifications.innerHTML = sorted.slice(0, 4).map(renderNotification).join("") || `<div class="empty">No notifications yet.</div>`;
   els.notificationList.innerHTML = sorted.map(renderNotification).join("") || `<div class="empty">No notifications yet.</div>`;
   document.querySelectorAll("[data-read-note]").forEach((button) => {
@@ -1045,6 +1927,223 @@ function renderNotification(note) {
       ${note.read ? "" : `<button class="link-btn" data-read-note="${note.id}" type="button">Mark read</button>`}
     </article>
   `;
+}
+
+function showEmployeeProfile(profileId) {
+  const profile = state.profiles.find(item => item.id === profileId);
+  if (!profile) return;
+
+  const todayReport = getReportFor(profile.id);
+  const reportRequired = isReportRequiredProfile(profile);
+  const showReportStatus = canReviewReports();
+
+  if (!todayReport && reportRequired && showReportStatus) {
+    toast(`${profile.name} has not filled today's report.`);
+  }
+
+  const childProfiles = state.profiles.filter(item => item.reportsTo === profile.id);
+  const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id);
+  const ownTasks = state.tasks.filter(task => ownFreelancers.some(person => person.id === task.freelancerId));
+  const reports = state.dailyReports
+    .filter(report => report.userId === profile.id)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 5);
+
+  document.getElementById("employeeProfileTitle").textContent =
+    `${profile.name} (${roleLabels[profile.role] || profile.role})`;
+
+  document.getElementById("employeeProfileBody").innerHTML = `
+    <div class="profile-grid">
+      <article>
+        <h3>Details</h3>
+        <dl>
+          <dt>Email</dt><dd>${escapeHtml(profile.email || "")}</dd>
+          <dt>Reports to</dt><dd>${escapeHtml(getProfileName(profile.reportsTo))}</dd>
+          <dt>Direct reports</dt><dd>${childProfiles.length}</dd>
+          <dt>Own freelancers</dt><dd>${ownFreelancers.length}</dd>
+          <dt>Own assignments</dt><dd>${ownTasks.length}</dd>
+        </dl>
+      </article>
+      <article>
+        <h3>Today</h3>
+        ${!showReportStatus ? `
+          <p class="missing-text">EOD report status is visible only to admin and manager.</p>
+        ` : todayReport ? `
+          <dl>
+            <dt>Work</dt><dd>${escapeHtml(todayReport.todayWork)}</dd>
+            <dt>Tomorrow</dt><dd>${escapeHtml(todayReport.tomorrowPlan)}</dd>
+            <dt>Roadblocks</dt><dd>${escapeHtml(todayReport.roadblocks || "None")}</dd>
+            <dt>Files reviewed</dt><dd>${Number(todayReport.filesReviewed || 0)}</dd>
+          </dl>
+        ` : reportRequired
+          ? `<p class="missing-text">Today's work report is not filled.</p>`
+          : `<p class="missing-text">This role reviews EOD reports and does not submit one.</p>`}
+      </article>
+    </div>
+    <section class="profile-section">
+      <h3>Recent reports</h3>
+      ${!showReportStatus
+        ? `<div class="empty">Report history is visible only to admin and manager.</div>`
+        : reports.length ? reports.map(report => `
+        <article class="report-card">
+          <header><h4>${formatDate(report.date)}</h4><span>${Number(report.filesReviewed || 0)} files</span></header>
+          <p>${escapeHtml(report.todayWork)}</p>
+        </article>
+      `).join("") : `<div class="empty">No reports yet.</div>`}
+    </section>
+    <section class="profile-section">
+      <h3>Freelancers</h3>
+      ${ownFreelancers.length ? ownFreelancers.map(person => `
+        <button class="profile-row" type="button" onclick="showFreelancerProfile('${person.id}')">
+          <span>${escapeHtml(person.name)}</span>
+          <small>${escapeHtml(person.status || "")}</small>
+        </button>
+      `).join("") : `<div class="empty">No owned freelancers.</div>`}
+    </section>
+  `;
+
+  document.getElementById("employeeProfileModal").showModal();
+}
+
+function showFreelancerProfile(freelancerId) {
+  const person = findFreelancer(freelancerId);
+  if (!person) return;
+
+  const tasks = state.tasks.filter(task => task.freelancerId === freelancerId);
+  const completed = tasks.filter(task => task.status === "Completed").length;
+  const totalFiles = tasks.reduce((sum, task) => sum + Number(task.taskCount || 0), 0);
+  const completedFiles = tasks
+    .filter(task => task.status === "Completed")
+    .reduce((sum, task) => sum + Number(task.taskCount || 0), 0);
+  const progress = totalFiles ? Math.round((completedFiles / totalFiles) * 100) : 0;
+
+  document.getElementById("freelancerProfileTitle").textContent = person.name;
+  document.getElementById("freelancerProfileBody").innerHTML = `
+    <div class="profile-grid">
+      <article>
+        <h3>Details</h3>
+        <dl>
+          <dt>Email</dt><dd><a href="mailto:${encodeURIComponent(person.email || "")}">${escapeHtml(person.email || "")}</a></dd>
+          <dt>Mobile</dt><dd>${escapeHtml(person.mobile || "")}</dd>
+          <dt>Owner</dt><dd>${escapeHtml(getProfileName(person.ownerId))}</dd>
+          <dt>State</dt><dd>${escapeHtml(person.state || "")}</dd>
+          <dt>District</dt><dd>${escapeHtml(person.district || "")}</dd>
+          <dt>Language</dt><dd>${escapeHtml(person.language || "")}</dd>
+          <dt>Rate</dt><dd>${escapeHtml(person.rate || "")}</dd>
+          <dt>Status</dt><dd>${escapeHtml(person.status || "")}</dd>
+        </dl>
+        <button class="primary-btn" type="button" onclick="openFreelancerWhatsApp('${person.id}')">
+          Send WhatsApp
+        </button>
+      </article>
+      <article>
+        <h3>Progress</h3>
+        <div class="progress"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <dl>
+          <dt>Assignments</dt><dd>${tasks.length}</dd>
+          <dt>Completed</dt><dd>${completed}</dd>
+          <dt>Files assigned</dt><dd>${totalFiles}</dd>
+          <dt>Completed files</dt><dd>${completedFiles}</dd>
+        </dl>
+      </article>
+    </div>
+    <section class="profile-section">
+      <h3>Assignment history</h3>
+      ${tasks.length ? tasks.map(task => {
+        const operation = findOperation(task.operationId);
+        return `
+          <article class="task-card">
+            <strong>${escapeHtml(getTaskType(task))}</strong>
+            <div class="task-meta">Batch: ${escapeHtml(operation?.batchName || "-")}</div>
+            <div class="task-meta">${formatDate(task.startDate)} to ${formatDate(task.deadlineDate)}</div>
+            <div class="task-meta">Count: ${Number(task.taskCount || 0)} | Status: ${escapeHtml(task.status || "")}</div>
+            <button class="ghost-btn" type="button" onclick="openTaskWhatsApp('${task.id}')">WhatsApp brief</button>
+          </article>
+        `;
+      }).join("") : `<div class="empty">No assignments yet.</div>`}
+    </section>
+  `;
+
+  document.getElementById("freelancerProfileModal").showModal();
+}
+
+function normalizeWhatsAppNumber(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function openWhatsAppMessage(mobile, message) {
+  const phone = normalizeWhatsAppNumber(mobile);
+
+  if (!phone) {
+    toast("Freelancer mobile number is missing.");
+    return;
+  }
+
+  window.open(
+    `https://wa.me/${phone}?text=${encodeURIComponent(message)}`,
+    "_blank",
+    "noopener"
+  );
+}
+
+function buildTaskAssignmentMessage(task) {
+  const person = findFreelancer(task.freelancerId);
+  const replacements = getTaskTemplateReplacements(task);
+  let body = state.emailTemplate.body;
+
+  Object.entries(replacements).forEach(([token, value]) => {
+    body = body.replaceAll(token, value);
+  });
+
+  return body || [
+    `Hi ${person?.name || ""},`,
+    "",
+    "A new task has been assigned to you.",
+    "",
+    buildTaskDetails(task),
+    "",
+    `Thanks,`,
+    state.emailSettings.senderName
+  ].join("\n");
+}
+
+function openTaskWhatsApp(taskId) {
+  const task = state.tasks.find(item => item.id === taskId);
+  const person = task ? findFreelancer(task.freelancerId) : null;
+
+  if (!task || !person) {
+    toast("Task or freelancer details are missing.");
+    return;
+  }
+
+  openWhatsAppMessage(person.mobile, buildTaskAssignmentMessage(task));
+}
+
+function openFreelancerWhatsApp(freelancerId) {
+  const person = findFreelancer(freelancerId);
+
+  if (!person) return;
+
+  const activeTasks = state.tasks.filter(task =>
+    task.freelancerId === freelancerId && task.status !== "Completed"
+  );
+
+  const message = [
+    `Hi ${person.name},`,
+    "",
+    activeTasks.length
+      ? "Sharing your current active work summary:"
+      : "Sharing a quick update from the operations desk.",
+    "",
+    activeTasks.length
+      ? activeTasks.map(task => `- ${getTaskType(task)}: ${Number(task.taskCount || 0)} files, deadline ${formatDate(task.deadlineDate)}`).join("\n")
+      : "No active assignments are pending right now.",
+    "",
+    `Thanks,`,
+    state.emailSettings.senderName
+  ].join("\n");
+
+  openWhatsAppMessage(person.mobile, message);
 }
 
 async function updateTask(taskId, patch) {
@@ -1222,17 +2321,7 @@ async function sendFreelancerEmail({
 
 async function sendTaskAssignmentEmail(task) {
   const person = findFreelancer(task.freelancerId);
-
-  const replacements = {
-    "{{freelancerName}}": person?.name || "",
-    "{{taskType}}": getTaskType(task),
-    "{{taskCount}}": Number(task.taskCount || 0),
-    "{{startDate}}": formatDate(task.startDate),
-    "{{deadlineDate}}": formatDate(task.deadlineDate),
-    "{{brief}}": task.brief || "",
-    "{{senderName}}": state.emailSettings.senderName,
-    "{{senderEmail}}": state.emailSettings.senderEmail
-  };
+  const replacements = getTaskTemplateReplacements(task);
 
   let subject = state.emailTemplate.subject;
   let body = state.emailTemplate.body;
@@ -1248,6 +2337,21 @@ async function sendTaskAssignmentEmail(task) {
     body,
     eventKey: `task-assigned-${task.id}`
   });
+}
+
+function getTaskTemplateReplacements(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return {
+    "{{freelancerName}}": person?.name || "",
+    "{{taskType}}": getTaskType(task),
+    "{{taskCount}}": Number(task.taskCount || 0),
+    "{{startDate}}": formatDate(task.startDate),
+    "{{deadlineDate}}": formatDate(task.deadlineDate),
+    "{{brief}}": task.brief || "",
+    "{{senderName}}": state.emailSettings.senderName,
+    "{{senderEmail}}": state.emailSettings.senderEmail
+  };
 }
 
 async function sendTaskUpdateEmail(task, previousTask) {
@@ -1523,12 +2627,13 @@ function renderOperations() {
     );
 
   if (!grid) return;
+  const scopedTasks = getScopedTasks();
 
   grid.innerHTML =
     state.operations.map(op => {
 
       const assigned =
-        state.tasks
+        scopedTasks
           .filter(
             task =>
               task.operationId === op.id
@@ -1551,24 +2656,12 @@ Math.max(
 const progress =
 Math.min(
   100,
-  Math.round(
-    (assigned / Number(op.volume)) * 100
-  )
+  Number(op.volume)
+    ? Math.round(
+      (assigned / Number(op.volume)) * 100
+    )
+    : 0
 );
-
-const completed =
-assigned >= Number(op.volume);
-
-if (
-completed &&
-op.status !== "Completed"
-) {
-
-  op.status = "Completed";
-
-  saveState();
-
-}
 
 const deadline =
 new Date(op.deadlineDate);
@@ -1827,7 +2920,8 @@ function importData(file) {
           XLSX.utils.sheet_to_json(
             sheet,
             {
-              defval: ""
+              defval: "",
+              raw: false
             }
           );
 
@@ -1869,12 +2963,18 @@ function importData(file) {
 
 function importFreelancers(rows) {
 
+  const normalizeColumnName = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
   const getValue = (row, names) => {
 
     const normalizedRow =
       Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
-          String(key).trim().toLowerCase(),
+          normalizeColumnName(key),
           value
         ])
       );
@@ -1883,7 +2983,7 @@ function importFreelancers(rows) {
 
       const value =
         normalizedRow[
-          name.toLowerCase()
+          normalizeColumnName(name)
         ];
 
       if (value !== undefined && value !== null) {
@@ -1903,15 +3003,31 @@ function importFreelancers(rows) {
       .map(row => ({
 
         id: uid("fr"),
+        ownerId:
+          getAssignableFreelancerOwners()[0]?.id ||
+          getCurrentProfile().id,
 
         name:
           getValue(row, ["Name", "Freelancer Name", "Full Name"]),
 
         email:
-          getValue(row, ["Email", "Email ID", "Email Address"]),
+          getValue(row, ["Email", "Email ID", "Email Address", "Mail ID"]),
 
         mobile:
-          getValue(row, ["Mobile", "Phone", "Contact", "Contact Number"]),
+          getValue(row, [
+            "Mobile",
+            "Mobile Number",
+            "Mobile No",
+            "Mobile No.",
+            "Phone",
+            "Phone Number",
+            "Contact",
+            "Contact Number",
+            "Contact No",
+            "Contact No.",
+            "Whatsapp",
+            "WhatsApp Number"
+          ]),
 
         role:
           getValue(row, ["Role", "Skill", "Designation"]),
@@ -1923,7 +3039,15 @@ function importFreelancers(rows) {
           getValue(row, ["District", "City"]),
 
         language:
-          getValue(row, ["Language", "Languages"]),
+          getValue(row, [
+            "Language",
+            "Languages",
+            "Language(s)",
+            "Known Language",
+            "Known Languages",
+            "Languages Known",
+            "Language Known"
+          ]),
 
         rate:
           getValue(row, ["Rate", "Pay Rate", "Price"]),

@@ -14,7 +14,7 @@
         <div class="brand">
           <span class="brand-mark">📋</span>
           <div>
-            <strong>Associate Desk</strong>
+            <strong>Operations Desk</strong>
             <small>Secure access</small>
           </div>
         </div>
@@ -42,12 +42,14 @@
         <div class="brand">
           <span class="brand-mark">📋</span>
           <div>
-            <strong style="color: white; font-weight: 700; font-size:x-large;">Associate Desk</strong>
+            <strong style="color: white; font-weight: 700; font-size:x-large;">Operations Desk</strong>
             <small style="text-align: center; padding-bottom: 0.3cm;">Operations center</small>
           </div>
         </div>
         <nav class="nav" aria-label="Main navigation">
           <button class="nav-btn active" data-view="dashboard"><span>🏠</span><span class="nav-label">Dashboard</span></button>
+          <button class="nav-btn" data-view="team" type="button"><span>🧭</span><span class="nav-label">Team</span></button>
+          <button class="nav-btn" data-view="reports" type="button"><span>📝</span><span class="nav-label">Daily Reports</span></button>
           <button class="nav-btn" data-view="operations" type="button"><span>⚙️</span><span class="nav-label">Operations</span></button>
           <button class="nav-btn" data-view="freelancers" type="button"><span>👥</span><span class="nav-label">Freelancers</span></button>
           <button class="nav-btn" data-view="tasks" type="button"><span>📋</span><span class="nav-label">Assignments</span></button>
@@ -68,6 +70,7 @@
           </div>
           <div class="top-actions">
             <button class="ghost-btn" id="installBtn" hidden> Install App</button>
+            <span class="welcome-user" id="welcomeUser">Welcome</span>
             <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
             <button class="ghost-btn" id="exportDataBtn"> Export Data</button>
             <button class="ghost-btn" id="importDataBtn"> Import Data</button>
@@ -97,6 +100,70 @@
                 <button class="link-btn" data-jump="notifications" type="button">View all</button>
               </div>
               <div class="list" id="recentNotifications"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="team-view" aria-labelledby="team-heading">
+          <div class="section-head">
+            <div>
+              <h2 id="team-heading" style="font-size:xx-large;">Team Hierarchy</h2>
+              <p class="section-subtitle">Admin &gt; Manager &gt; Associate &gt; Executive</p>
+            </div>
+            <button class="primary-btn" id="openEmployeeModalBtn" type="button">+ Add Employee</button>
+          </div>
+          <section class="panel" id="approvalPanel">
+            <div class="panel-head">
+              <h3>Pending approvals</h3>
+              <span id="approvalBadge" class="pill warning">0 pending</span>
+            </div>
+            <div id="approvalList" class="report-list"></div>
+          </section>
+          <div class="team-layout">
+            <section class="panel" id="reportReviewPanel">
+              <div class="panel-head">
+                <h3>Visible Team</h3>
+                <button class="link-btn" id="checkMissingReportsBtn" type="button">Check reports</button>
+              </div>
+              <div id="teamTree" class="team-tree"></div>
+            </section>
+            <section class="panel">
+              <h3>Role Controls</h3>
+              <div id="roleControls" class="role-controls"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="reports-view" aria-labelledby="reports-heading">
+          <div class="section-head">
+            <div>
+              <h2 id="reports-heading" style="font-size:xx-large;">Daily Work Reports</h2>
+              <p class="section-subtitle">Associates and executives submit EOD reports; managers and admin review them.</p>
+            </div>
+          </div>
+          <div class="reports-layout">
+            <section class="panel" id="dailyReportSubmitPanel">
+              <h3>Submit today’s report</h3>
+              <form id="dailyReportForm" class="template-box">
+                <label for="reportDate">Date</label>
+                <input id="reportDate" name="date" type="date" required>
+                <label for="todayWork">Today's work details</label>
+                <textarea id="todayWork" name="todayWork" rows="4" required></textarea>
+                <label for="tomorrowPlan">Tomorrow's plan</label>
+                <textarea id="tomorrowPlan" name="tomorrowPlan" rows="3" required></textarea>
+                <label for="roadblocks">Roadblocks</label>
+                <textarea id="roadblocks" name="roadblocks" rows="3" placeholder="Write None if there are no roadblocks"></textarea>
+                <label for="filesReviewed">Files reviewed</label>
+                <input id="filesReviewed" name="filesReviewed" type="number" min="0" step="1" required>
+                <button class="primary-btn" type="submit">Save daily report</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h3>Team reports</h3>
+                <span id="missingReportBadge" class="pill warning">0 missing</span>
+              </div>
+              <div id="dailyReportList" class="report-list"></div>
             </section>
           </div>
         </section>
@@ -376,6 +443,7 @@ Save Operation
           <label>Name<input name="name" required placeholder="Aarav Mehta" /></label>
           <label>Email<input name="email" required type="email" placeholder="aarav@example.com" /></label>
           <label>Mobile<input name="mobile" required placeholder="1234567890" /></label>
+          <label>Owner<select name="ownerId" id="freelancerOwnerSelect" required></select></label>
           <label>Role<input name="role" required placeholder="UI Designer" /></label>
           <label>State<input name="state" required placeholder="Maharashtra" /></label>
           <label>District<input name="district" required placeholder="Pune" /></label>
@@ -445,6 +513,52 @@ Batch Name
           <button class="primary-btn" value="default" type="submit">Assign and email</button>
         </menu>
       </form>
+    </dialog>
+
+    <dialog id="employeeModal">
+      <form method="dialog" class="modal-form" id="employeeForm">
+        <div class="modal-head">
+          <h2>Add employee</h2>
+          <button class="icon-btn" type="button" onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <div class="form-grid">
+          <input type="hidden" name="id" id="employeeId">
+          <label>Name<input name="name" required placeholder="Employee name"></label>
+          <label>Email<input name="email" required type="email" placeholder="employee@yourdomain.com"></label>
+          <label>Role
+            <select name="role" id="employeeRoleSelect" required>
+              <option value="manager">Manager</option>
+              <option value="associate">Associate</option>
+              <option value="executive">Executive</option>
+            </select>
+          </label>
+          <label>Reports to<select name="reportsTo" id="employeeReportsToSelect"></select></label>
+        </div>
+        <menu>
+          <button class="ghost-btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+          <button class="primary-btn" value="default" type="submit">Save employee</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="employeeProfileModal">
+      <div class="modal-form profile-modal">
+        <div class="modal-head">
+          <h2 id="employeeProfileTitle">Employee profile</h2>
+          <button class="icon-btn" type="button" onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <div id="employeeProfileBody"></div>
+      </div>
+    </dialog>
+
+    <dialog id="freelancerProfileModal">
+      <div class="modal-form profile-modal">
+        <div class="modal-head">
+          <h2 id="freelancerProfileTitle">Freelancer profile</h2>
+          <button class="icon-btn" type="button" onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <div id="freelancerProfileBody"></div>
+      </div>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
