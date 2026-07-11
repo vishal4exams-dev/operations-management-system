@@ -28,11 +28,16 @@ const roleLabels = {
 };
 const reportRequiredRoles = ["associate", "executive"];
 const APPROVAL_REQUESTS_TABLE = "approval_requests";
+const PROFILES_TABLE = "profiles";
 
 let approvalRequestsSyncing = false;
 let approvalRequestsLoaded = false;
 let approvalRequestsLoadAttempted = false;
 let approvalRequestsSyncError = "";
+let profilesSyncing = false;
+let profilesLoaded = false;
+let profilesLoadAttempted = false;
+let profilesSyncError = "";
 
 function createLocalSupabaseFallback() {
   return {
@@ -511,7 +516,7 @@ document
   document.getElementById("freelancerModal").close();
 });
 
-document.getElementById("employeeForm")?.addEventListener("submit", (event) => {
+document.getElementById("employeeForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   if (getCurrentProfile().role !== "admin") {
@@ -530,16 +535,31 @@ document.getElementById("employeeForm")?.addEventListener("submit", (event) => {
 
   if (data.id) {
     const index = state.profiles.findIndex(profile => profile.id === data.id);
-    state.profiles[index] = {
+    const profile = {
       ...state.profiles[index],
       ...data
     };
+
+    if (!(await saveProfileToSupabase(profile))) {
+      toast(profilesSyncError || "Employee could not be saved to Supabase.");
+      return;
+    }
+
+    state.profiles[index] = profile;
     toast("Employee updated.");
   } else {
-    state.profiles.push({
+    const profile = {
       id: uid("user"),
+      status: "active",
       ...data
-    });
+    };
+
+    if (!(await saveProfileToSupabase(profile))) {
+      toast(profilesSyncError || "Employee could not be saved to Supabase.");
+      return;
+    }
+
+    state.profiles.push(profile);
     toast("Employee added.");
   }
 
@@ -879,7 +899,8 @@ function getUserNameFromAuth(user) {
 
 function findApprovedProfileByEmail(email) {
   return state.profiles.find(profile =>
-    profile.status !== "pending" && sameEmail(profile.email, email)
+    (!profile.status || profile.status === "active") &&
+    sameEmail(profile.email, email)
   );
 }
 
@@ -891,6 +912,142 @@ function findPendingApprovalByEmail(email) {
 
 function canSyncApprovalRequests() {
   return typeof supabaseClient.from === "function";
+}
+
+function canSyncProfiles() {
+  return typeof supabaseClient.from === "function";
+}
+
+function profileToRow(profile) {
+  return {
+    id: profile.id,
+    name: profile.name || "",
+    email: profile.email || "",
+    role: profile.role || "executive",
+    reports_to: profile.reportsTo || "",
+    status: profile.status || "active",
+    created_at: profile.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function profileFromRow(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    email: row.email || "",
+    role: row.role || "executive",
+    reportsTo: row.reports_to || "",
+    status: row.status || "active",
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || ""
+  };
+}
+
+function mergeProfiles(profiles) {
+  let changed = false;
+
+  profiles.forEach(profile => {
+    const index = state.profiles.findIndex(item =>
+      item.id === profile.id || sameEmail(item.email, profile.email)
+    );
+
+    if (profile.status === "removed") {
+      if (index >= 0 && state.profiles[index].role !== "admin") {
+        state.profiles.splice(index, 1);
+        changed = true;
+      }
+      return;
+    }
+
+    if (index >= 0) {
+      state.profiles[index] = {
+        ...state.profiles[index],
+        ...profile
+      };
+    } else {
+      state.profiles.push(profile);
+    }
+    changed = true;
+  });
+
+  if (!state.profiles.some(profile => profile.role === "admin")) {
+    state.profiles.unshift(clone(demoState.profiles[0]));
+    changed = true;
+  }
+
+  if (!state.profiles.some(profile => profile.id === state.currentProfileId)) {
+    state.currentProfileId = state.profiles[0]?.id || "user-admin";
+    changed = true;
+  }
+
+  return changed;
+}
+
+async function syncProfilesFromSupabase({ force = false } = {}) {
+  if (!canSyncProfiles() || profilesSyncing) return false;
+  if (profilesLoaded && !force) return false;
+
+  profilesSyncing = true;
+  profilesLoadAttempted = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(PROFILES_TABLE)
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+
+    if (mergeProfiles((data || []).map(profileFromRow))) {
+      saveState();
+    }
+
+    profilesLoaded = true;
+    profilesSyncError = "";
+    render();
+    return true;
+  } catch (error) {
+    console.warn("Profile Supabase load skipped", error);
+    profilesSyncError =
+      error?.message ||
+      "Profiles table is not reachable. Run the Supabase live sync SQL.";
+    render();
+    return false;
+  } finally {
+    profilesSyncing = false;
+  }
+}
+
+async function saveProfileToSupabase(profile) {
+  if (!canSyncProfiles()) return true;
+
+  try {
+    const { error } = await supabaseClient
+      .from(PROFILES_TABLE)
+      .upsert(profileToRow(profile), {
+        onConflict: "id"
+      });
+
+    if (error) throw error;
+    profilesSyncError = "";
+    profilesLoaded = false;
+    return true;
+  } catch (error) {
+    console.warn("Profile Supabase sync failed", error);
+    profilesSyncError =
+      error?.message ||
+      "Profiles table is not reachable. Run the Supabase live sync SQL.";
+    return false;
+  }
+}
+
+async function removeProfileFromSupabase(profile) {
+  return saveProfileToSupabase({
+    ...profile,
+    status: "removed",
+    removedAt: new Date().toISOString()
+  });
 }
 
 function approvalRequestToRow(request) {
@@ -1058,6 +1215,8 @@ async function createApprovalRequest({ name, email, authUserId = "" }) {
 }
 
 async function applyLoggedInUser(user) {
+  await syncProfilesFromSupabase({ force: true });
+
   const email = user?.email || "";
   const name = getUserNameFromAuth(user);
   const profile = findApprovedProfileByEmail(email);
@@ -1319,6 +1478,10 @@ function populateFreelancerFilters() {
 function renderTeam() {
   if (!els.teamTree || !els.roleControls) return;
 
+  if (!profilesLoaded && !profilesLoadAttempted) {
+    syncProfilesFromSupabase();
+  }
+
   const current = getCurrentProfile();
   const showReportStatus = canReviewReports(current);
   const visibleIds = new Set(getVisibleProfileIds());
@@ -1362,9 +1525,13 @@ function renderTeam() {
     .filter(profile => profile.id === current.id || !visibleIds.has(profile.reportsTo))
     .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
 
-  els.teamTree.innerHTML = roots.length
+  const syncWarning = profilesSyncError
+    ? `<div class="empty warning-box">${escapeHtml(profilesSyncError)}</div>`
+    : "";
+
+  els.teamTree.innerHTML = syncWarning + (roots.length
     ? roots.map(renderNode).join("")
-    : `<div class="empty">No visible team members.</div>`;
+    : `<div class="empty">No visible team members.</div>`);
 
   const controls = [
     ["Active role", roleLabels[current.role] || current.role],
@@ -1468,7 +1635,7 @@ function renderApprovalRequests() {
   pending.forEach(request => renderApprovalReportsToSelect(request.id));
 }
 
-function approveSignupRequest(requestId) {
+async function approveSignupRequest(requestId) {
   if (getCurrentProfile().role !== "admin") {
     toast("Only admin can approve users.");
     return;
@@ -1489,20 +1656,36 @@ function approveSignupRequest(requestId) {
 
   if (existingProfile) {
     request.status = "approved";
+    request.approvedAt = request.approvedAt || new Date().toISOString();
+    request.approvedBy = request.approvedBy || getCurrentProfile().id;
+    request.requestedRole = existingProfile.role || role;
+    request.reportsTo = existingProfile.reportsTo || reportsTo;
+    if (!(await saveProfileToSupabase(existingProfile))) {
+      toast(profilesSyncError || "Approved profile could not be saved to Supabase.");
+      return;
+    }
+    await saveApprovalRequestToSupabase(request);
     toast("This user is already approved.");
     saveState();
     render();
     return;
   }
 
-  state.profiles.push({
+  const profile = {
     id: request.authUserId || uid("user"),
     name: request.name,
     email: request.email,
     role,
     reportsTo,
     status: "active"
-  });
+  };
+
+  if (!(await saveProfileToSupabase(profile))) {
+    toast(profilesSyncError || "Approved profile could not be saved to Supabase.");
+    return;
+  }
+
+  state.profiles.push(profile);
 
   request.status = "approved";
   request.approvedAt = new Date().toISOString();
@@ -1519,7 +1702,7 @@ function approveSignupRequest(requestId) {
   });
 
   saveState();
-  saveApprovalRequestToSupabase(request);
+  await saveApprovalRequestToSupabase(request);
   render();
   toast(`${request.name} approved.`);
 }
@@ -2138,7 +2321,7 @@ function showEmployeeProfile(profileId) {
   document.getElementById("employeeProfileModal").showModal();
 }
 
-function removeApprovedMember(profileId) {
+async function removeApprovedMember(profileId) {
   if (getCurrentProfile().role !== "admin") {
     toast("Only admin can remove approved members.");
     return;
@@ -2159,6 +2342,11 @@ function removeApprovedMember(profileId) {
   }
 
   if (!confirm(`Remove ${profile.name} from approved members?`)) {
+    return;
+  }
+
+  if (!(await removeProfileFromSupabase(profile))) {
+    toast(profilesSyncError || "Member could not be removed from Supabase.");
     return;
   }
 
