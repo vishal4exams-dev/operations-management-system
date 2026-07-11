@@ -27,6 +27,10 @@ const roleLabels = {
   executive: "Executive"
 };
 const reportRequiredRoles = ["associate", "executive"];
+const APPROVAL_REQUESTS_TABLE = "approval_requests";
+
+let approvalRequestsSyncing = false;
+let approvalRequestsLoaded = false;
 
 function createLocalSupabaseFallback() {
   return {
@@ -423,6 +427,11 @@ document.getElementById("checkMissingReportsBtn")?.addEventListener("click", () 
       : "Everyone visible has filled today's report."
   );
   renderDailyReports();
+});
+
+document.getElementById("refreshApprovalRequestsBtn")?.addEventListener("click", async () => {
+  const synced = await syncApprovalRequestsFromSupabase({ force: true });
+  toast(synced ? "Approval requests refreshed." : "No remote approval requests found.");
 });
 
 document.getElementById("saveTemplateBtn").addEventListener("click", () => {
@@ -900,6 +909,106 @@ function findPendingApprovalByEmail(email) {
   );
 }
 
+function canSyncApprovalRequests() {
+  return typeof supabaseClient.from === "function";
+}
+
+function approvalRequestToRow(request) {
+  return {
+    id: request.id,
+    auth_user_id: request.authUserId || "",
+    name: request.name || "",
+    email: request.email || "",
+    status: request.status || "pending",
+    requested_role: request.requestedRole || "",
+    reports_to: request.reportsTo || "",
+    created_at: request.createdAt || new Date().toISOString(),
+    approved_at: request.approvedAt || null,
+    approved_by: request.approvedBy || "",
+    denied_at: request.deniedAt || null,
+    denied_by: request.deniedBy || ""
+  };
+}
+
+function approvalRequestFromRow(row) {
+  return {
+    id: row.id,
+    authUserId: row.auth_user_id || "",
+    name: row.name || "",
+    email: row.email || "",
+    status: row.status || "pending",
+    requestedRole: row.requested_role || "",
+    reportsTo: row.reports_to || "",
+    createdAt: row.created_at || new Date().toISOString(),
+    approvedAt: row.approved_at || "",
+    approvedBy: row.approved_by || "",
+    deniedAt: row.denied_at || "",
+    deniedBy: row.denied_by || ""
+  };
+}
+
+function mergeApprovalRequests(requests) {
+  requests.forEach(request => {
+    const existing = state.approvalRequests.find(item => item.id === request.id) ||
+      state.approvalRequests.find(item =>
+        item.status === "pending" &&
+        request.status === "pending" &&
+        sameEmail(item.email, request.email)
+      );
+
+    if (existing) {
+      Object.assign(existing, request);
+    } else {
+      state.approvalRequests.push(request);
+    }
+  });
+}
+
+async function saveApprovalRequestToSupabase(request) {
+  if (!canSyncApprovalRequests()) return false;
+
+  try {
+    const { error } = await supabaseClient
+      .from(APPROVAL_REQUESTS_TABLE)
+      .upsert(approvalRequestToRow(request), {
+        onConflict: "id"
+      });
+
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.warn("Approval request Supabase sync skipped", error);
+    return false;
+  }
+}
+
+async function syncApprovalRequestsFromSupabase({ force = false } = {}) {
+  if (!canSyncApprovalRequests() || approvalRequestsSyncing) return false;
+  if (approvalRequestsLoaded && !force) return false;
+
+  approvalRequestsSyncing = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(APPROVAL_REQUESTS_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    mergeApprovalRequests((data || []).map(approvalRequestFromRow));
+    approvalRequestsLoaded = true;
+    saveState();
+    renderApprovalRequests();
+    return true;
+  } catch (error) {
+    console.warn("Approval request Supabase load skipped", error);
+    return false;
+  } finally {
+    approvalRequestsSyncing = false;
+  }
+}
+
 function createApprovalRequest({ name, email, authUserId = "" }) {
   const existingProfile = findApprovedProfileByEmail(email);
 
@@ -913,6 +1022,7 @@ function createApprovalRequest({ name, email, authUserId = "" }) {
     existingRequest.name = name || existingRequest.name;
     existingRequest.authUserId = authUserId || existingRequest.authUserId;
     saveState();
+    saveApprovalRequestToSupabase(existingRequest);
     return existingRequest;
   }
 
@@ -937,6 +1047,7 @@ function createApprovalRequest({ name, email, authUserId = "" }) {
   });
 
   saveState();
+  saveApprovalRequestToSupabase(request);
   renderApprovalRequests();
   renderNotifications();
 
@@ -1315,6 +1426,8 @@ function renderApprovalRequests() {
     return;
   }
 
+  syncApprovalRequestsFromSupabase();
+
   els.approvalList.innerHTML = pending.length
     ? pending.map(request => `
       <article class="report-card approval-card">
@@ -1397,6 +1510,7 @@ function approveSignupRequest(requestId) {
   });
 
   saveState();
+  saveApprovalRequestToSupabase(request);
   render();
   toast(`${request.name} approved.`);
 }
@@ -1424,6 +1538,7 @@ function denySignupRequest(requestId) {
   });
 
   saveState();
+  saveApprovalRequestToSupabase(request);
   render();
   toast(`${request.name} denied.`);
 }
