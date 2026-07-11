@@ -1105,13 +1105,40 @@ async function saveApprovalRequestToSupabase(request) {
   if (!canSyncApprovalRequests()) return false;
 
   try {
-    const { error } = await supabaseClient
-      .from(APPROVAL_REQUESTS_TABLE)
-      .upsert(approvalRequestToRow(request), {
-        onConflict: "id"
-      });
+    const row = approvalRequestToRow(request);
+    const { id, ...updateRow } = row;
+    let result;
 
-    if (error) throw error;
+    if (row.status === "pending") {
+      result = await supabaseClient
+        .from(APPROVAL_REQUESTS_TABLE)
+        .upsert(row, {
+          onConflict: "id"
+        });
+    } else {
+      result = await supabaseClient
+        .from(APPROVAL_REQUESTS_TABLE)
+        .update(updateRow)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+
+      if (!result.error && !result.data) {
+        result = await supabaseClient
+          .from(APPROVAL_REQUESTS_TABLE)
+          .update(updateRow)
+          .eq("email", row.email)
+          .eq("status", "pending")
+          .select("id")
+          .maybeSingle();
+      }
+
+      if (!result.error && !result.data) {
+        throw new Error("Approval request was not found in Supabase. Refresh and try again.");
+      }
+    }
+
+    if (result.error) throw result.error;
     approvalRequestsSyncError = "";
     return true;
   } catch (error) {
@@ -1653,6 +1680,7 @@ async function approveSignupRequest(requestId) {
   }
 
   const existingProfile = findApprovedProfileByEmail(request.email);
+  const previousRequest = { ...request };
 
   if (existingProfile) {
     request.status = "approved";
@@ -1664,7 +1692,11 @@ async function approveSignupRequest(requestId) {
       toast(profilesSyncError || "Approved profile could not be saved to Supabase.");
       return;
     }
-    await saveApprovalRequestToSupabase(request);
+    if (!(await saveApprovalRequestToSupabase(request))) {
+      Object.assign(request, previousRequest);
+      toast(approvalRequestsSyncError || "Approval request could not be updated in Supabase.");
+      return;
+    }
     toast("This user is already approved.");
     saveState();
     render();
@@ -1685,8 +1717,6 @@ async function approveSignupRequest(requestId) {
     return;
   }
 
-  state.profiles.push(profile);
-
   request.status = "approved";
   request.approvedAt = new Date().toISOString();
   request.approvedBy = getCurrentProfile().id;
@@ -1701,13 +1731,19 @@ async function approveSignupRequest(requestId) {
     createdAt: new Date().toISOString()
   });
 
+  if (!(await saveApprovalRequestToSupabase(request))) {
+    Object.assign(request, previousRequest);
+    toast(approvalRequestsSyncError || "Approval request could not be updated in Supabase.");
+    return;
+  }
+
+  state.profiles.push(profile);
   saveState();
-  await saveApprovalRequestToSupabase(request);
   render();
   toast(`${request.name} approved.`);
 }
 
-function denySignupRequest(requestId) {
+async function denySignupRequest(requestId) {
   if (getCurrentProfile().role !== "admin") {
     toast("Only admin can deny users.");
     return;
@@ -1717,9 +1753,17 @@ function denySignupRequest(requestId) {
 
   if (!request) return;
 
+  const previousRequest = { ...request };
+
   request.status = "denied";
   request.deniedAt = new Date().toISOString();
   request.deniedBy = getCurrentProfile().id;
+
+  if (!(await saveApprovalRequestToSupabase(request))) {
+    Object.assign(request, previousRequest);
+    toast(approvalRequestsSyncError || "Approval request could not be denied in Supabase.");
+    return;
+  }
 
   state.notifications.push({
     id: uid("note"),
@@ -1730,7 +1774,6 @@ function denySignupRequest(requestId) {
   });
 
   saveState();
-  saveApprovalRequestToSupabase(request);
   render();
   toast(`${request.name} denied.`);
 }
