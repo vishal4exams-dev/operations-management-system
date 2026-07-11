@@ -22,6 +22,9 @@ create index if not exists approval_requests_email_idx
 
 alter table public.approval_requests enable row level security;
 
+grant usage on schema public to anon, authenticated;
+grant select, insert, update on public.approval_requests to anon, authenticated;
+
 drop policy if exists "Anyone can create signup approval request"
   on public.approval_requests;
 

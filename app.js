@@ -31,6 +31,7 @@ const APPROVAL_REQUESTS_TABLE = "approval_requests";
 
 let approvalRequestsSyncing = false;
 let approvalRequestsLoaded = false;
+let approvalRequestsLoadAttempted = false;
 let approvalRequestsSyncError = "";
 
 function createLocalSupabaseFallback() {
@@ -70,12 +71,13 @@ function isLocalPreview() {
 
 
   supabaseClient.auth.getSession()
-.then(({ data }) => {
+.then(async ({ data }) => {
 
   if (data.session) {
 
-    applyLoggedInUser(data.session.user);
-    queueDeadlineEmails();
+    if (await applyLoggedInUser(data.session.user)) {
+      queueDeadlineEmails();
+    }
 
   }
 
@@ -277,7 +279,7 @@ document.getElementById("loginForm")
 
   }
 
-  if (!applyLoggedInUser(data.user)) {
+  if (!(await applyLoggedInUser(data.user))) {
     return;
   }
 
@@ -299,15 +301,17 @@ document.getElementById("signupForm")
     document.getElementById("signupEmail")
       .value.trim();
 
-  createApprovalRequest({
+  const result = await createApprovalRequest({
     name,
     email,
     authUserId: uid("auth")
   });
 
-  toast(
-    "Signup request sent to admin for approval."
-  );
+  if (result.saved) {
+    toast("Signup request sent to admin.");
+  } else {
+    toast(approvalRequestsSyncError || "Couldn't send approval request. Please try again.");
+  }
 
   document
     .getElementById("signupForm")
@@ -967,6 +971,7 @@ async function syncApprovalRequestsFromSupabase({ force = false } = {}) {
   if (approvalRequestsLoaded && !force) return false;
 
   approvalRequestsSyncing = true;
+  approvalRequestsLoadAttempted = true;
 
   try {
     const { data, error } = await supabaseClient
@@ -990,17 +995,22 @@ async function syncApprovalRequestsFromSupabase({ force = false } = {}) {
     approvalRequestsSyncError =
       error?.message ||
       "Approval request table is not reachable. Run the Supabase approval SQL.";
+    renderApprovalRequests();
     return false;
   } finally {
     approvalRequestsSyncing = false;
   }
 }
 
-function createApprovalRequest({ name, email, authUserId = "" }) {
+async function createApprovalRequest({ name, email, authUserId = "" }) {
   const existingProfile = findApprovedProfileByEmail(email);
 
   if (existingProfile) {
-    return existingProfile;
+    return {
+      request: null,
+      saved: true,
+      alreadyApproved: true
+    };
   }
 
   const existingRequest = findPendingApprovalByEmail(email);
@@ -1009,8 +1019,11 @@ function createApprovalRequest({ name, email, authUserId = "" }) {
     existingRequest.name = name || existingRequest.name;
     existingRequest.authUserId = authUserId || existingRequest.authUserId;
     saveState();
-    saveApprovalRequestToSupabase(existingRequest);
-    return existingRequest;
+    const saved = await saveApprovalRequestToSupabase(existingRequest);
+    return {
+      request: existingRequest,
+      saved: saved || !canSyncApprovalRequests()
+    };
   }
 
   const request = {
@@ -1034,20 +1047,23 @@ function createApprovalRequest({ name, email, authUserId = "" }) {
   });
 
   saveState();
-  saveApprovalRequestToSupabase(request);
+  const saved = await saveApprovalRequestToSupabase(request);
   renderApprovalRequests();
   renderNotifications();
 
-  return request;
+  return {
+    request,
+    saved: saved || !canSyncApprovalRequests()
+  };
 }
 
-function applyLoggedInUser(user) {
+async function applyLoggedInUser(user) {
   const email = user?.email || "";
   const name = getUserNameFromAuth(user);
   const profile = findApprovedProfileByEmail(email);
 
   if (!profile) {
-    createApprovalRequest({
+    await createApprovalRequest({
       name,
       email,
       authUserId: user?.id || ""
@@ -1413,7 +1429,9 @@ function renderApprovalRequests() {
     return;
   }
 
-  syncApprovalRequestsFromSupabase();
+  if (!approvalRequestsLoaded && !approvalRequestsLoadAttempted) {
+    syncApprovalRequestsFromSupabase();
+  }
 
   const syncWarning = approvalRequestsSyncError
     ? `<div class="empty warning-box">${escapeHtml(approvalRequestsSyncError)}</div>`
