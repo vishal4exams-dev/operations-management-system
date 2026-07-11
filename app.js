@@ -253,11 +253,16 @@ document.getElementById("loginForm")
     });
 
   if (error) {
-    if (isLocalPreview()) {
+    const approvedProfile = findApprovedProfileByEmail(email);
+
+    if (approvedProfile || isLocalPreview()) {
       data = {
         user: {
-          id: "local-demo-user",
-          email
+          id: approvedProfile?.id || "local-demo-user",
+          email,
+          user_metadata: {
+            name: approvedProfile?.name || email.split("@")[0]
+          }
         }
       };
       error = null;
@@ -293,44 +298,10 @@ document.getElementById("signupForm")
     document.getElementById("signupEmail")
       .value.trim();
 
-  const password =
-    document.getElementById("signupPassword")
-      .value;
-
-  let { data, error } =
-    await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name
-        }
-      }
-    });
-
-  if (error) {
-    if (isLocalPreview()) {
-      data = {
-        user: {
-          id: uid("auth"),
-          email
-        }
-      };
-      error = null;
-    }
-  }
-
-  if (error) {
-
-    toast(error.message);
-    return;
-
-  }
-
   createApprovalRequest({
     name,
     email,
-    authUserId: data?.user?.id || ""
+    authUserId: uid("auth")
   });
 
   toast(
@@ -1612,7 +1583,7 @@ function renderDailyReports() {
 
 function getVisibleNotifications() {
   const visibleFreelancerIds = new Set(getScopedFreelancers().map(person => person.id));
-  const adminOnlyTypes = new Set(["Signup approval", "User approved", "User denied"]);
+  const adminOnlyTypes = new Set(["Signup approval", "User approved", "User denied", "Member removed"]);
   const isAdmin = getCurrentProfile().role === "admin";
 
   return state.notifications
@@ -2059,6 +2030,10 @@ function showEmployeeProfile(profileId) {
   const childProfiles = state.profiles.filter(item => item.reportsTo === profile.id);
   const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id);
   const ownTasks = state.tasks.filter(task => ownFreelancers.some(person => person.id === task.freelancerId));
+  const canRemoveMember =
+    getCurrentProfile().role === "admin" &&
+    profile.role !== "admin" &&
+    profile.id !== getCurrentProfile().id;
   const reports = state.dailyReports
     .filter(report => report.userId === profile.id)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -2078,6 +2053,11 @@ function showEmployeeProfile(profileId) {
           <dt>Own freelancers</dt><dd>${ownFreelancers.length}</dd>
           <dt>Own assignments</dt><dd>${ownTasks.length}</dd>
         </dl>
+        ${canRemoveMember ? `
+          <button class="danger-btn remove-member-btn" type="button" onclick="removeApprovedMember('${profile.id}')">
+            Remove member
+          </button>
+        ` : ""}
       </article>
       <article>
         <h3>Today</h3>
@@ -2118,6 +2098,64 @@ function showEmployeeProfile(profileId) {
   `;
 
   document.getElementById("employeeProfileModal").showModal();
+}
+
+function removeApprovedMember(profileId) {
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can remove approved members.");
+    return;
+  }
+
+  const profile = state.profiles.find(item => item.id === profileId);
+
+  if (!profile || profile.role === "admin") {
+    toast("Admin profile cannot be removed.");
+    return;
+  }
+
+  const directReports = state.profiles.filter(item => item.reportsTo === profileId);
+
+  if (directReports.length) {
+    toast("Reassign or remove this member's direct reports first.");
+    return;
+  }
+
+  if (!confirm(`Remove ${profile.name} from approved members?`)) {
+    return;
+  }
+
+  const reassignmentTarget = profile.reportsTo || getCurrentProfile().id;
+
+  state.freelancers.forEach(person => {
+    if (person.ownerId === profileId) {
+      person.ownerId = reassignmentTarget;
+    }
+  });
+
+  state.profiles = state.profiles.filter(item => item.id !== profileId);
+  state.dailyReports = state.dailyReports.filter(report => report.userId !== profileId);
+
+  state.approvalRequests
+    .filter(request => sameEmail(request.email, profile.email))
+    .forEach(request => {
+      request.status = "denied";
+      request.deniedAt = request.deniedAt || new Date().toISOString();
+      request.deniedBy = request.deniedBy || getCurrentProfile().id;
+      saveApprovalRequestToSupabase(request);
+    });
+
+  state.notifications.push({
+    id: uid("note"),
+    type: "Member removed",
+    message: `${profile.name} removed from approved members.`,
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
+  saveState();
+  document.getElementById("employeeProfileModal")?.close();
+  render();
+  toast(`${profile.name} removed.`);
 }
 
 function showFreelancerProfile(freelancerId) {
