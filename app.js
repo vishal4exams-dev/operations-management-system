@@ -974,6 +974,9 @@ async function syncApprovalRequestsFromSupabase({ force = false } = {}) {
       .select("*")
       .order("created_at", { ascending: false });
 
+    console.log("Approval data:", data);
+    console.log("Approval error:", error);
+
     if (error) throw error;
 
     mergeApprovalRequests((data || []).map(approvalRequestFromRow));
