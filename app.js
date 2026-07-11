@@ -62,7 +62,9 @@ function createLocalSupabaseFallback() {
         error: null
       }),
       signOut: async () => ({ error: null }),
-      resetPasswordForEmail: async () => ({ error: null })
+      resetPasswordForEmail: async () => ({ error: null }),
+      exchangeCodeForSession: async () => ({ error: null }),
+      updateUser: async () => ({ error: null })
     },
     functions: {
       invoke: async () => ({ data: { ok: true, local: true }, error: null })
@@ -74,9 +76,67 @@ function isLocalPreview() {
   return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 }
 
+function getPasswordResetRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.search = "?reset=password";
+  url.hash = "";
+  return url.toString();
+}
+
+function isPasswordResetMode() {
+  const search = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+  return search.get("reset") === "password" ||
+    search.get("type") === "recovery" ||
+    hash.get("type") === "recovery";
+}
+
+function clearPasswordResetUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("reset");
+  url.searchParams.delete("type");
+  url.searchParams.delete("code");
+  url.hash = "";
+  window.history.replaceState({}, document.title, url.pathname + url.search);
+}
+
+async function ensurePasswordRecoverySession() {
+  const { data } = await supabaseClient.auth.getSession();
+
+  if (data.session) {
+    return true;
+  }
+
+  const code = new URLSearchParams(window.location.search).get("code");
+
+  if (!code || typeof supabaseClient.auth.exchangeCodeForSession !== "function") {
+    return true;
+  }
+
+  const { error } =
+    await supabaseClient.auth.exchangeCodeForSession(window.location.href);
+
+  if (error) {
+    toast(error.message);
+    return false;
+  }
+
+  return true;
+}
+
 
   supabaseClient.auth.getSession()
 .then(async ({ data }) => {
+
+  if (isPasswordResetMode()) {
+    if (!data.session) {
+      await ensurePasswordRecoverySession();
+    }
+    setAuthMode("reset");
+    updateAuthView();
+    return;
+  }
 
   if (data.session) {
 
@@ -241,6 +301,10 @@ const els = {
 document.getElementById("showLoginBtn").addEventListener("click", () => setAuthMode("login"));
 document.getElementById("showSignupBtn").addEventListener("click", () => setAuthMode("signup"));
 
+if (isPasswordResetMode()) {
+  setAuthMode("reset");
+}
+
 document.getElementById("loginForm")
 .addEventListener("submit", async (event) => {
 
@@ -346,7 +410,7 @@ document
       email,
       {
         redirectTo:
-          window.location.origin
+          getPasswordResetRedirectUrl()
       }
     );
 
@@ -361,6 +425,53 @@ document
     );
 
   }
+
+});
+
+document
+.getElementById("resetPasswordForm")
+?.addEventListener("submit", async (event) => {
+
+  event.preventDefault();
+
+  const password =
+    document
+      .getElementById("newPassword")
+      .value;
+
+  const confirmPassword =
+    document
+      .getElementById("confirmNewPassword")
+      .value;
+
+  if (password !== confirmPassword) {
+    toast("Passwords do not match.");
+    return;
+  }
+
+  if (!(await ensurePasswordRecoverySession())) {
+    return;
+  }
+
+  const { error } =
+    await supabaseClient.auth.updateUser({
+      password
+    });
+
+  if (error) {
+    toast(error.message);
+    return;
+  }
+
+  await supabaseClient.auth.signOut();
+  sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_EMAIL_KEY);
+  sessionStorage.removeItem(SESSION_NAME_KEY);
+  clearPasswordResetUrl();
+  setAuthMode("login");
+  updateAuthView();
+  event.currentTarget.reset();
+  toast("Password updated. Please login.");
 
 });
 
@@ -855,6 +966,7 @@ function normalizeState(nextState = {}) {
 function updateAuthView() {
 
   const hasSession =
+    !isPasswordResetMode() &&
     !!sessionStorage.getItem(
       SESSION_KEY
     );
@@ -879,10 +991,12 @@ function updateAuthView() {
 
 function setAuthMode(mode) {
   const isSignup = mode === "signup";
+  const isReset = mode === "reset";
   document.getElementById("signupForm").classList.toggle("hidden", !isSignup);
-  document.getElementById("loginForm").classList.toggle("hidden", isSignup);
+  document.getElementById("resetPasswordForm")?.classList.toggle("hidden", !isReset);
+  document.getElementById("loginForm").classList.toggle("hidden", isSignup || isReset);
   document.getElementById("showSignupBtn").classList.toggle("active", isSignup);
-  document.getElementById("showLoginBtn").classList.toggle("active", !isSignup);
+  document.getElementById("showLoginBtn").classList.toggle("active", !isSignup && !isReset);
 }
 
 function sameEmail(left, right) {
