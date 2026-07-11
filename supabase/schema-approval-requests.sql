@@ -34,18 +34,24 @@ create policy "Anyone can create signup approval request"
 drop policy if exists "Authenticated users can read approval requests"
   on public.approval_requests;
 
-create policy "Authenticated users can read approval requests"
+drop policy if exists "Frontend can read approval requests"
+  on public.approval_requests;
+
+create policy "Frontend can read approval requests"
   on public.approval_requests
   for select
-  to authenticated
+  to anon, authenticated
   using (true);
 
 drop policy if exists "Authenticated users can update approval requests"
   on public.approval_requests;
 
-create policy "Authenticated users can update approval requests"
+drop policy if exists "Frontend can update approval requests"
+  on public.approval_requests;
+
+create policy "Frontend can update approval requests"
   on public.approval_requests
   for update
-  to authenticated
+  to anon, authenticated
   using (true)
   with check (true);

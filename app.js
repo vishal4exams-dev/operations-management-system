@@ -31,6 +31,7 @@ const APPROVAL_REQUESTS_TABLE = "approval_requests";
 
 let approvalRequestsSyncing = false;
 let approvalRequestsLoaded = false;
+let approvalRequestsSyncError = "";
 
 function createLocalSupabaseFallback() {
   return {
@@ -402,7 +403,11 @@ document.getElementById("checkMissingReportsBtn")?.addEventListener("click", () 
 
 document.getElementById("refreshApprovalRequestsBtn")?.addEventListener("click", async () => {
   const synced = await syncApprovalRequestsFromSupabase({ force: true });
-  toast(synced ? "Approval requests refreshed." : "No remote approval requests found.");
+  toast(
+    synced
+      ? "Approval requests refreshed."
+      : approvalRequestsSyncError || "No remote approval requests found."
+  );
 });
 
 document.getElementById("saveTemplateBtn").addEventListener("click", () => {
@@ -946,9 +951,13 @@ async function saveApprovalRequestToSupabase(request) {
       });
 
     if (error) throw error;
+    approvalRequestsSyncError = "";
     return true;
   } catch (error) {
     console.warn("Approval request Supabase sync skipped", error);
+    approvalRequestsSyncError =
+      error?.message ||
+      "Approval request table is not reachable. Run the Supabase approval SQL.";
     return false;
   }
 }
@@ -969,11 +978,15 @@ async function syncApprovalRequestsFromSupabase({ force = false } = {}) {
 
     mergeApprovalRequests((data || []).map(approvalRequestFromRow));
     approvalRequestsLoaded = true;
+    approvalRequestsSyncError = "";
     saveState();
     renderApprovalRequests();
     return true;
   } catch (error) {
     console.warn("Approval request Supabase load skipped", error);
+    approvalRequestsSyncError =
+      error?.message ||
+      "Approval request table is not reachable. Run the Supabase approval SQL.";
     return false;
   } finally {
     approvalRequestsSyncing = false;
@@ -1399,7 +1412,11 @@ function renderApprovalRequests() {
 
   syncApprovalRequestsFromSupabase();
 
-  els.approvalList.innerHTML = pending.length
+  const syncWarning = approvalRequestsSyncError
+    ? `<div class="empty warning-box">${escapeHtml(approvalRequestsSyncError)}</div>`
+    : "";
+
+  els.approvalList.innerHTML = syncWarning + (pending.length
     ? pending.map(request => `
       <article class="report-card approval-card">
         <header>
@@ -1425,7 +1442,7 @@ function renderApprovalRequests() {
         </div>
       </article>
     `).join("")
-    : `<div class="empty">No pending signup approvals.</div>`;
+    : `<div class="empty">No pending signup approvals.</div>`);
 
   pending.forEach(request => renderApprovalReportsToSelect(request.id));
 }

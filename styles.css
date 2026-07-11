@@ -1424,6 +1424,12 @@ box-shadow:var(--shadow-md);
   color:#92400e;
 }
 
+.warning-box{
+  border:1px solid #f59e0b;
+  background:#fffbeb;
+  color:#92400e;
+}
+
 @media (max-width: 900px){
   .team-layout,
   .reports-layout,
