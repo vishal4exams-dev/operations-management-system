@@ -1,4 +1,4 @@
-const CACHE_NAME = "oms-v39";
+const CACHE_NAME = "oms-v40";
 
 const urlsToCache = [
   "./",
@@ -71,5 +71,22 @@ self.addEventListener("fetch", event => {
             response || caches.match("./index.html")
           )
       )
+  );
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+
+  event.waitUntil(
+    self.clients.matchAll({
+      type: "window",
+      includeUncontrolled: true
+    }).then(clients => {
+      if (clients.length) {
+        return clients[0].focus();
+      }
+
+      return self.clients.openWindow("./index.html");
+    })
   );
 });

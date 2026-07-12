@@ -29,6 +29,9 @@ const roleLabels = {
 const reportRequiredRoles = ["associate", "executive"];
 const APPROVAL_REQUESTS_TABLE = "approval_requests";
 const PROFILES_TABLE = "profiles";
+const DAILY_REPORTS_TABLE = "daily_reports";
+const NOTIFICATIONS_TABLE = "notifications";
+const DAILY_REPORT_DEADLINE_HOUR = 19;
 
 let approvalRequestsSyncing = false;
 let approvalRequestsLoaded = false;
@@ -38,6 +41,15 @@ let profilesSyncing = false;
 let profilesLoaded = false;
 let profilesLoadAttempted = false;
 let profilesSyncError = "";
+let dailyReportsSyncing = false;
+let dailyReportsLoaded = false;
+let dailyReportsLoadAttempted = false;
+let dailyReportsSyncError = "";
+let notificationsSyncing = false;
+let notificationsLoaded = false;
+let notificationsLoadAttempted = false;
+let notificationsSyncError = "";
+const browserNotifiedIds = new Set();
 
 function createLocalSupabaseFallback() {
   return {
@@ -291,6 +303,9 @@ const els = {
   dailyReportForm: document.getElementById("dailyReportForm"),
   dailyReportList: document.getElementById("dailyReportList"),
   missingReportBadge: document.getElementById("missingReportBadge"),
+  reportDateFilter: document.getElementById("reportDateFilter"),
+  reportRoleFilter: document.getElementById("reportRoleFilter"),
+  reportMemberFilter: document.getElementById("reportMemberFilter"),
   freelancerOwnerSelect: document.getElementById("freelancerOwnerSelect"),
   employeeReportsToSelect: document.getElementById("employeeReportsToSelect"),
   loginScreen: document.getElementById("loginScreen"),
@@ -511,7 +526,9 @@ document.getElementById("openEmployeeModalBtn")?.addEventListener("click", () =>
   document.getElementById("employeeModal").showModal();
 });
 
-document.getElementById("checkMissingReportsBtn")?.addEventListener("click", () => {
+document.getElementById("checkMissingReportsBtn")?.addEventListener("click", async () => {
+  await ensureBrowserNotificationPermission();
+  await checkDailyReportDeadline({ force: true });
   const missing = getMissingDailyReports();
   toast(
     missing.length
@@ -679,7 +696,7 @@ document.getElementById("employeeForm")?.addEventListener("submit", async (event
   document.getElementById("employeeModal").close();
 });
 
-els.dailyReportForm?.addEventListener("submit", (event) => {
+els.dailyReportForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const data = Object.fromEntries(
@@ -698,6 +715,7 @@ els.dailyReportForm?.addEventListener("submit", (event) => {
   );
 
   const reportData = {
+    id: existing?.id || uid("report"),
     userId: profile.id,
     date: data.date,
     todayWork: data.todayWork,
@@ -707,20 +725,24 @@ els.dailyReportForm?.addEventListener("submit", (event) => {
     createdAt: new Date().toISOString()
   };
 
+  if (!(await saveDailyReportToSupabase(reportData))) {
+    toast(dailyReportsSyncError || "Daily report could not be saved to Supabase.");
+    return;
+  }
+
   if (existing) {
     Object.assign(existing, reportData);
     toast("Daily report updated.");
   } else {
-    state.dailyReports.push({
-      id: uid("report"),
-      ...reportData
-    });
+    state.dailyReports.push(reportData);
     toast("Daily report submitted.");
   }
 
+  await notifyReportSubmitted(reportData, profile);
   saveState();
   renderDailyReports();
   renderTeam();
+  renderNotifications();
 });
 
 document.getElementById("taskForm").addEventListener("submit", async (event) => {
@@ -815,6 +837,15 @@ document.getElementById("languageFilter")
 
 document.getElementById("statusFilter")
   ?.addEventListener("change", renderFreelancers);
+
+els.reportDateFilter
+  ?.addEventListener("change", renderDailyReports);
+
+els.reportRoleFilter
+  ?.addEventListener("change", renderDailyReports);
+
+els.reportMemberFilter
+  ?.addEventListener("change", renderDailyReports);
 
 els.navButtons.forEach((button) => {
   button.addEventListener("click", () => setView(button.dataset.view));
@@ -1032,6 +1063,14 @@ function canSyncProfiles() {
   return typeof supabaseClient.from === "function";
 }
 
+function canSyncDailyReports() {
+  return typeof supabaseClient.from === "function";
+}
+
+function canSyncNotifications() {
+  return typeof supabaseClient.from === "function";
+}
+
 function profileToRow(profile) {
   return {
     id: profile.id,
@@ -1162,6 +1201,382 @@ async function removeProfileFromSupabase(profile) {
     status: "removed",
     removedAt: new Date().toISOString()
   });
+}
+
+function dailyReportToRow(report) {
+  return {
+    id: report.id,
+    user_id: report.userId || "",
+    date: report.date || getTodayKey(),
+    today_work: report.todayWork || "",
+    tomorrow_plan: report.tomorrowPlan || "",
+    roadblocks: report.roadblocks || "None",
+    files_reviewed: Number(report.filesReviewed || 0),
+    created_at: report.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function dailyReportFromRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id || "",
+    date: row.date || getTodayKey(),
+    todayWork: row.today_work || "",
+    tomorrowPlan: row.tomorrow_plan || "",
+    roadblocks: row.roadblocks || "None",
+    filesReviewed: Number(row.files_reviewed || 0),
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || ""
+  };
+}
+
+function mergeDailyReports(reports) {
+  let changed = false;
+
+  reports.forEach(report => {
+    const index = state.dailyReports.findIndex(item =>
+      item.id === report.id ||
+      (item.userId === report.userId && item.date === report.date)
+    );
+
+    if (index >= 0) {
+      state.dailyReports[index] = {
+        ...state.dailyReports[index],
+        ...report
+      };
+    } else {
+      state.dailyReports.push(report);
+    }
+    changed = true;
+  });
+
+  return changed;
+}
+
+async function syncDailyReportsFromSupabase({ force = false } = {}) {
+  if (!canSyncDailyReports() || dailyReportsSyncing) return false;
+  if (dailyReportsLoaded && !force) return false;
+
+  dailyReportsSyncing = true;
+  dailyReportsLoadAttempted = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(DAILY_REPORTS_TABLE)
+      .select("*")
+      .order("date", { ascending: false });
+
+    if (error) throw error;
+
+    if (mergeDailyReports((data || []).map(dailyReportFromRow))) {
+      saveState();
+    }
+
+    dailyReportsLoaded = true;
+    dailyReportsSyncError = "";
+    renderDailyReports();
+    return true;
+  } catch (error) {
+    console.warn("Daily report Supabase load skipped", error);
+    dailyReportsSyncError =
+      error?.message ||
+      "Daily reports table is not reachable. Run the Supabase live sync SQL.";
+    renderDailyReports();
+    return false;
+  } finally {
+    dailyReportsSyncing = false;
+  }
+}
+
+async function saveDailyReportToSupabase(report) {
+  if (!canSyncDailyReports()) return true;
+
+  try {
+    const { error } = await supabaseClient
+      .from(DAILY_REPORTS_TABLE)
+      .upsert(dailyReportToRow(report), {
+        onConflict: "user_id,date"
+      });
+
+    if (error) throw error;
+    dailyReportsLoaded = false;
+    dailyReportsSyncError = "";
+    return true;
+  } catch (error) {
+    console.warn("Daily report Supabase sync failed", error);
+    dailyReportsSyncError =
+      error?.message ||
+      "Daily reports table is not reachable. Run the Supabase live sync SQL.";
+    return false;
+  }
+}
+
+function notificationToRow(note) {
+  return {
+    id: note.id,
+    type: note.type || "Notification",
+    message: note.message || "",
+    read: !!note.read,
+    target_profile_id: note.targetProfileId || "",
+    freelancer_id: note.freelancerId || "",
+    task_id: note.taskId || "",
+    meta_key: note.metaKey || "",
+    created_at: note.createdAt || new Date().toISOString()
+  };
+}
+
+function notificationFromRow(row) {
+  return {
+    id: row.id,
+    type: row.type || "Notification",
+    message: row.message || "",
+    read: !!row.read,
+    targetProfileId: row.target_profile_id || "",
+    freelancerId: row.freelancer_id || "",
+    taskId: row.task_id || "",
+    metaKey: row.meta_key || "",
+    createdAt: row.created_at || new Date().toISOString()
+  };
+}
+
+function mergeNotifications(notifications, { showBrowser = false } = {}) {
+  let changed = false;
+
+  notifications.forEach(note => {
+    const existing = state.notifications.find(item =>
+      item.id === note.id ||
+      (note.metaKey && item.metaKey === note.metaKey && item.targetProfileId === note.targetProfileId)
+    );
+
+    if (existing) {
+      Object.assign(existing, note);
+    } else {
+      state.notifications.push(note);
+    }
+
+    if (showBrowser) {
+      maybeShowBrowserNotification(note);
+    }
+    changed = true;
+  });
+
+  return changed;
+}
+
+async function syncNotificationsFromSupabase({ force = false } = {}) {
+  if (!canSyncNotifications() || notificationsSyncing) return false;
+  if (notificationsLoaded && !force) return false;
+
+  notificationsSyncing = true;
+  notificationsLoadAttempted = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(NOTIFICATIONS_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    if (mergeNotifications((data || []).map(notificationFromRow), { showBrowser: true })) {
+      saveState();
+    }
+
+    notificationsLoaded = true;
+    notificationsSyncError = "";
+    renderNotifications();
+    return true;
+  } catch (error) {
+    console.warn("Notification Supabase load skipped", error);
+    notificationsSyncError =
+      error?.message ||
+      "Notifications table is not reachable. Run the Supabase live sync SQL.";
+    return false;
+  } finally {
+    notificationsSyncing = false;
+  }
+}
+
+async function saveNotificationToSupabase(note) {
+  if (!canSyncNotifications()) return true;
+
+  try {
+    const { error } = await supabaseClient
+      .from(NOTIFICATIONS_TABLE)
+      .upsert(notificationToRow(note), {
+        onConflict: "id"
+      });
+
+    if (error) throw error;
+    notificationsLoaded = false;
+    notificationsSyncError = "";
+    return true;
+  } catch (error) {
+    console.warn("Notification Supabase sync failed", error);
+    notificationsSyncError =
+      error?.message ||
+      "Notifications table is not reachable. Run the Supabase live sync SQL.";
+    return false;
+  }
+}
+
+async function addNotification(note, { browser = false } = {}) {
+  const nextNote = {
+    id: note.id || uid("note"),
+    type: note.type || "Notification",
+    message: note.message || "",
+    read: !!note.read,
+    createdAt: note.createdAt || new Date().toISOString(),
+    ...note
+  };
+
+  const existing = state.notifications.find(item =>
+    item.id === nextNote.id ||
+    (nextNote.metaKey && item.metaKey === nextNote.metaKey && item.targetProfileId === nextNote.targetProfileId)
+  );
+
+  if (existing) {
+    Object.assign(existing, nextNote);
+  } else {
+    state.notifications.push(nextNote);
+  }
+
+  await saveNotificationToSupabase(existing || nextNote);
+
+  if (browser) {
+    maybeShowBrowserNotification(existing || nextNote);
+  }
+
+  return existing || nextNote;
+}
+
+function canCurrentProfileSeeNotification(note) {
+  const current = getCurrentProfile();
+
+  if (!note.targetProfileId) return true;
+  if (note.targetProfileId === current.id) return true;
+  if (current.role === "admin") return true;
+
+  return getDescendantProfileIds(current.id).includes(note.targetProfileId);
+}
+
+async function ensureBrowserNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+
+  const permission = await Notification.requestPermission();
+  return permission === "granted";
+}
+
+async function showBrowserNotification(title, body, tag = "") {
+  if (!(await ensureBrowserNotificationPermission())) return;
+
+  const options = {
+    body,
+    tag,
+    icon: "icon-192.png",
+    badge: "icon-192.png"
+  };
+
+  try {
+    const registration = "serviceWorker" in navigator
+      ? await navigator.serviceWorker.ready
+      : null;
+
+    if (registration?.showNotification) {
+      registration.showNotification(title, options);
+      return;
+    }
+  } catch (error) {
+    console.warn("Service worker notification skipped", error);
+  }
+
+  new Notification(title, options);
+}
+
+function maybeShowBrowserNotification(note) {
+  if (!note || note.read || browserNotifiedIds.has(note.id)) return;
+  if (!canCurrentProfileSeeNotification(note)) return;
+
+  browserNotifiedIds.add(note.id);
+  showBrowserNotification(note.type || "Operations Desk", note.message || "", note.metaKey || note.id);
+}
+
+function isWeekday(date = new Date()) {
+  const day = date.getDay();
+  return day >= 1 && day <= 5;
+}
+
+function isAfterDailyReportDeadline(date = new Date()) {
+  return isWeekday(date) && date.getHours() >= DAILY_REPORT_DEADLINE_HOUR;
+}
+
+function getManagerForProfile(profile) {
+  return state.profiles.find(item => item.id === profile.reportsTo) ||
+    state.profiles.find(item => item.role === "admin") ||
+    null;
+}
+
+async function notifyReportSubmitted(report, profile = getCurrentProfile()) {
+  await addNotification({
+    type: "Daily report submitted",
+    message: `Thank you ${profile.name}, your ${formatDate(report.date)} report has been submitted.`,
+    targetProfileId: profile.id,
+    metaKey: `daily-report-submitted-${report.date}-${profile.id}`
+  }, {
+    browser: true
+  });
+}
+
+async function notifyMissingDailyReport(profile, date) {
+  const manager = getManagerForProfile(profile);
+  const targets = [profile.id, manager?.id].filter(Boolean);
+
+  for (const targetProfileId of [...new Set(targets)]) {
+    await addNotification({
+      type: "Daily report missing",
+      message: `${profile.name} has not submitted the ${formatDate(date)} daily report by 7 PM.`,
+      targetProfileId,
+      metaKey: `daily-report-missing-${date}-${profile.id}-${targetProfileId}`
+    }, {
+      browser: true
+    });
+  }
+}
+
+async function checkDailyReportDeadline({ force = false } = {}) {
+  const now = new Date();
+  const date = getTodayKey();
+
+  if (!force && !isAfterDailyReportDeadline(now)) return;
+
+  await syncDailyReportsFromSupabase();
+
+  const missing = state.profiles
+    .filter(profile => (!profile.status || profile.status === "active"))
+    .filter(isReportRequiredProfile)
+    .filter(profile => !getReportFor(profile.id, date));
+
+  for (const profile of missing) {
+    await notifyMissingDailyReport(profile, date);
+  }
+
+  if (missing.length) {
+    saveState();
+    renderNotifications();
+  }
+}
+
+function startDailyReportDeadlineMonitor() {
+  if (startDailyReportDeadlineMonitor.timer) return;
+
+  checkDailyReportDeadline();
+  startDailyReportDeadlineMonitor.timer = setInterval(
+    () => checkDailyReportDeadline(),
+    60 * 1000
+  );
 }
 
 function approvalRequestToRow(request) {
@@ -1383,6 +1798,7 @@ async function applyLoggedInUser(user) {
   sessionStorage.setItem(SESSION_NAME_KEY, profile.name);
   saveState();
   render();
+  startDailyReportDeadlineMonitor();
   updateAuthView();
   return true;
 }
@@ -1908,14 +2324,25 @@ function renderFreelancerOwnerSelect(selectedOwnerId = "") {
 function renderDailyReports() {
   if (!els.dailyReportForm || !els.dailyReportList) return;
 
+  if (!dailyReportsLoaded && !dailyReportsLoadAttempted) {
+    syncDailyReportsFromSupabase();
+  }
+
   const today = getTodayKey();
   const current = getCurrentProfile();
   const currentReport = getReportFor(current.id, today);
   const submitPanel = document.getElementById("dailyReportSubmitPanel");
   const canSubmitReport = isReportRequiredProfile(current);
+  const selectedDate = els.reportDateFilter?.value || today;
+  const selectedRole = els.reportRoleFilter?.value || "all";
+  const selectedMember = els.reportMemberFilter?.value || "all";
 
   if (submitPanel) {
     submitPanel.hidden = !canSubmitReport;
+  }
+
+  if (els.reportDateFilter && !els.reportDateFilter.value) {
+    els.reportDateFilter.value = today;
   }
 
   if (canSubmitReport) {
@@ -1926,10 +2353,29 @@ function renderDailyReports() {
     document.getElementById("filesReviewed").value = currentReport?.filesReviewed ?? "";
   }
 
-  const visibleProfiles = getReviewableReportProfiles();
+  const allReviewableProfiles = getReviewableReportProfiles();
+
+  if (els.reportMemberFilter) {
+    const currentMemberValue = els.reportMemberFilter.value || "all";
+    els.reportMemberFilter.innerHTML =
+      `<option value="all">All members</option>` +
+      allReviewableProfiles.map(profile => `
+        <option value="${profile.id}">
+          ${escapeHtml(profile.name)} (${escapeHtml(roleLabels[profile.role] || profile.role)})
+        </option>
+      `).join("");
+    els.reportMemberFilter.value = allReviewableProfiles.some(profile => profile.id === currentMemberValue)
+      ? currentMemberValue
+      : "all";
+  }
+
+  const memberFilter = els.reportMemberFilter?.value || selectedMember;
+  const visibleProfiles = allReviewableProfiles
+    .filter(profile => selectedRole === "all" || profile.role === selectedRole)
+    .filter(profile => memberFilter === "all" || profile.id === memberFilter);
 
   const rows = visibleProfiles.map(profile => {
-    const report = getReportFor(profile.id, today);
+    const report = getReportFor(profile.id, selectedDate);
 
     return `
       <article class="report-card ${report ? "" : "missing"}">
@@ -1944,19 +2390,23 @@ function renderDailyReports() {
         </header>
         ${report ? `
           <dl>
+            <dt>Date</dt><dd>${formatDate(report.date)}</dd>
             <dt>Today's work</dt><dd>${escapeHtml(report.todayWork)}</dd>
             <dt>Tomorrow</dt><dd>${escapeHtml(report.tomorrowPlan)}</dd>
             <dt>Roadblocks</dt><dd>${escapeHtml(report.roadblocks || "None")}</dd>
             <dt>Files reviewed</dt><dd>${Number(report.filesReviewed || 0)}</dd>
           </dl>
-        ` : `<p class="missing-text">Today's report has not been filled.</p>`}
+        ` : `<p class="missing-text">${formatDate(selectedDate)} report has not been filled.</p>`}
       </article>
     `;
   });
 
-  const missingCount = getMissingDailyReports(today).length;
+  const missingCount = visibleProfiles.filter(profile => !getReportFor(profile.id, selectedDate)).length;
+  const syncWarning = dailyReportsSyncError
+    ? `<div class="empty warning-box">${escapeHtml(dailyReportsSyncError)}</div>`
+    : "";
   els.missingReportBadge.textContent = `${missingCount} missing`;
-  els.dailyReportList.innerHTML = rows.join("") || `<div class="empty">No EOD reports to review for this role.</div>`;
+  els.dailyReportList.innerHTML = syncWarning + (rows.join("") || `<div class="empty">No EOD reports to review for these filters.</div>`);
 }
 
 function getVisibleNotifications() {
@@ -1966,6 +2416,7 @@ function getVisibleNotifications() {
 
   return state.notifications
     .filter(note => !adminOnlyTypes.has(note.type) || isAdmin)
+    .filter(canCurrentProfileSeeNotification)
     .filter(note => !note.freelancerId || visibleFreelancerIds.has(note.freelancerId));
 }
 
@@ -2367,14 +2818,22 @@ function renderPayments() {
 }
 
 function renderNotifications() {
+  if (!notificationsLoaded && !notificationsLoadAttempted) {
+    syncNotificationsFromSupabase();
+  }
+
   const sorted = getVisibleNotifications()
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const syncWarning = notificationsSyncError
+    ? `<div class="empty warning-box">${escapeHtml(notificationsSyncError)}</div>`
+    : "";
   els.recentNotifications.innerHTML = sorted.slice(0, 4).map(renderNotification).join("") || `<div class="empty">No notifications yet.</div>`;
-  els.notificationList.innerHTML = sorted.map(renderNotification).join("") || `<div class="empty">No notifications yet.</div>`;
+  els.notificationList.innerHTML = syncWarning + (sorted.map(renderNotification).join("") || `<div class="empty">No notifications yet.</div>`);
   document.querySelectorAll("[data-read-note]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const note = state.notifications.find((item) => item.id === button.dataset.readNote);
       if (note) note.read = true;
+      if (note) await saveNotificationToSupabase(note);
       saveState();
       renderNotifications();
       renderMetrics();
@@ -2412,6 +2871,10 @@ function showEmployeeProfile(profileId) {
     getCurrentProfile().role === "admin" &&
     profile.role !== "admin" &&
     profile.id !== getCurrentProfile().id;
+  const canPingReport =
+    canManageProfile(profile) &&
+    isReportRequiredProfile(profile) &&
+    !todayReport;
   const reports = state.dailyReports
     .filter(report => report.userId === profile.id)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -2451,6 +2914,11 @@ function showEmployeeProfile(profileId) {
         ` : reportRequired
           ? `<p class="missing-text">Today's work report is not filled.</p>`
           : `<p class="missing-text">This role reviews EOD reports and does not submit one.</p>`}
+        ${canPingReport ? `
+          <button class="primary-btn remove-member-btn" type="button" onclick="pingDailyReport('${profile.id}')">
+            Ping for report
+          </button>
+        ` : ""}
       </article>
     </div>
     <section class="profile-section">
@@ -2476,6 +2944,26 @@ function showEmployeeProfile(profileId) {
   `;
 
   document.getElementById("employeeProfileModal").showModal();
+}
+
+async function pingDailyReport(profileId) {
+  const profile = state.profiles.find(item => item.id === profileId);
+
+  if (!profile || !canManageProfile(profile) || !isReportRequiredProfile(profile)) {
+    toast("You cannot ping this team member.");
+    return;
+  }
+
+  await addNotification({
+    type: "Daily report reminder",
+    message: `${getCurrentProfile().name} reminded you to submit today's daily report before 7 PM.`,
+    targetProfileId: profile.id,
+    metaKey: `daily-report-ping-${getTodayKey()}-${profile.id}-${Date.now()}`
+  });
+
+  saveState();
+  renderNotifications();
+  toast(`${profile.name} pinged for daily report.`);
 }
 
 async function removeApprovedMember(profileId) {
@@ -3326,40 +3814,241 @@ if ("serviceWorker" in navigator) {
 
 }
 
+function getExportSheets() {
+  return {
+    "Team Members": state.profiles.map(profile => ({
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      role: profile.role,
+      reportsTo: profile.reportsTo,
+      reportsToName: getProfileName(profile.reportsTo),
+      status: profile.status || "active"
+    })),
+    "Daily Reports": state.dailyReports.map(report => {
+      const profile = state.profiles.find(item => item.id === report.userId);
+      return {
+        id: report.id,
+        userId: report.userId,
+        name: profile?.name || "",
+        email: profile?.email || "",
+        role: profile?.role || "",
+        date: report.date,
+        todayWork: report.todayWork,
+        tomorrowPlan: report.tomorrowPlan,
+        roadblocks: report.roadblocks,
+        filesReviewed: report.filesReviewed,
+        createdAt: report.createdAt
+      };
+    }),
+    Freelancers: state.freelancers,
+    Operations: state.operations,
+    Tasks: state.tasks,
+    Notifications: state.notifications,
+    "Approval Requests": state.approvalRequests
+  };
+}
+
 function exportData() {
+  const today = new Date().toISOString().split("T")[0];
 
-  const data = JSON.stringify(
-    state,
-    null,
-    2
-  );
+  if (typeof XLSX !== "undefined") {
+    const workbook = XLSX.utils.book_new();
+    const sheets = getExportSheets();
 
-  const blob = new Blob(
-    [data],
-    {
-      type: "application/json"
-    }
-  );
+    Object.entries(sheets).forEach(([name, rows]) => {
+      const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+      XLSX.utils.book_append_sheet(workbook, worksheet, name.slice(0, 31));
+    });
 
-  const url =
-    URL.createObjectURL(blob);
+    XLSX.writeFile(workbook, `oms-export-${today}.xlsx`);
+    toast("Excel export downloaded.");
+    return;
+  }
 
-  const a =
-    document.createElement("a");
-
+  const data = JSON.stringify(state, null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
   a.href = url;
-
-  a.download =
-    `oms-backup-${
-      new Date()
-        .toISOString()
-        .split("T")[0]
-    }.json`;
-
+  a.download = `oms-backup-${today}.json`;
   a.click();
-
   URL.revokeObjectURL(url);
+}
 
+function normalizeImportColumn(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getImportValue(row, names) {
+  const normalizedRow =
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [
+        normalizeImportColumn(key),
+        value
+      ])
+    );
+
+  for (const name of names) {
+    const value = normalizedRow[normalizeImportColumn(name)];
+
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+}
+
+function upsertCollection(collection, item, matchFn) {
+  const index = collection.findIndex(matchFn);
+
+  if (index >= 0) {
+    collection[index] = {
+      ...collection[index],
+      ...item
+    };
+    return collection[index];
+  }
+
+  collection.push(item);
+  return item;
+}
+
+function detectImportType(sheetName, rows) {
+  const normalizedSheet = normalizeImportColumn(sheetName);
+  const firstRow = rows[0] || {};
+  const columns = Object.keys(firstRow).map(normalizeImportColumn);
+  const hasColumn = (...names) => names.some(name => columns.includes(normalizeImportColumn(name)));
+
+  if (normalizedSheet.includes("dailyreport") || hasColumn("todayWork", "tomorrowPlan", "filesReviewed")) return "dailyReports";
+  if (normalizedSheet.includes("teammember") || normalizedSheet === "profiles" || hasColumn("reportsTo", "reportsToName")) return "profiles";
+  if (normalizedSheet.includes("freelancer") || hasColumn("mobile", "rate", "ownerId")) return "freelancers";
+  if (normalizedSheet.includes("operation") || hasColumn("batchName", "volume", "source")) return "operations";
+  if (normalizedSheet.includes("task") || hasColumn("freelancerId", "deadlineDate", "taskCount")) return "tasks";
+  if (normalizedSheet.includes("notification") || hasColumn("targetProfileId", "message")) return "notifications";
+  if (normalizedSheet.includes("approval") || hasColumn("authUserId", "approvedAt", "deniedAt")) return "approvalRequests";
+
+  return "freelancers";
+}
+
+async function importRowsByType(type, rows) {
+  if (!rows.length) return 0;
+
+  if (type === "profiles") {
+    let count = 0;
+    for (const row of rows) {
+      const email = getImportValue(row, ["email", "Email", "Email Address"]);
+      const name = getImportValue(row, ["name", "Name", "Full Name"]);
+      if (!email && !name) continue;
+
+      const reportsToValue = getImportValue(row, ["reportsTo", "Reports To", "reportsToName"]);
+      const reportsToProfile = state.profiles.find(profile =>
+        profile.id === reportsToValue ||
+        sameEmail(profile.email, reportsToValue) ||
+        profile.name === reportsToValue
+      );
+      const profile = {
+        id: getImportValue(row, ["id", "ID"]) || uid("user"),
+        name: name || email.split("@")[0],
+        email,
+        role: getImportValue(row, ["role", "Role"]) || "executive",
+        reportsTo: reportsToProfile?.id || reportsToValue || "",
+        status: getImportValue(row, ["status", "Status"]) || "active"
+      };
+
+      upsertCollection(state.profiles, profile, item =>
+        item.id === profile.id || sameEmail(item.email, profile.email)
+      );
+      await saveProfileToSupabase(profile);
+      count++;
+    }
+    return count;
+  }
+
+  if (type === "dailyReports") {
+    let count = 0;
+    for (const row of rows) {
+      const email = getImportValue(row, ["email", "Email"]);
+      const userIdValue = getImportValue(row, ["userId", "User ID"]);
+      const profile = state.profiles.find(item =>
+        item.id === userIdValue || sameEmail(item.email, email)
+      );
+      const date = getImportValue(row, ["date", "Date"]);
+      if (!date || (!profile && !userIdValue)) continue;
+
+      const report = {
+        id: getImportValue(row, ["id", "ID"]) || uid("report"),
+        userId: profile?.id || userIdValue,
+        date,
+        todayWork: getImportValue(row, ["todayWork", "Today's Work", "Today Work"]),
+        tomorrowPlan: getImportValue(row, ["tomorrowPlan", "Tomorrow Plan"]),
+        roadblocks: getImportValue(row, ["roadblocks", "Roadblocks"]) || "None",
+        filesReviewed: Number(getImportValue(row, ["filesReviewed", "Files Reviewed"]) || 0),
+        createdAt: getImportValue(row, ["createdAt", "Created At"]) || new Date().toISOString()
+      };
+
+      upsertCollection(state.dailyReports, report, item =>
+        item.id === report.id || (item.userId === report.userId && item.date === report.date)
+      );
+      await saveDailyReportToSupabase(report);
+      count++;
+    }
+    return count;
+  }
+
+  if (type === "freelancers") {
+    return importFreelancers(rows, { silent: true });
+  }
+
+  const collectionMap = {
+    operations: "operations",
+    tasks: "tasks",
+    notifications: "notifications",
+    approvalRequests: "approvalRequests"
+  };
+  const collectionName = collectionMap[type];
+  if (!collectionName) return 0;
+
+  rows.forEach(row => {
+    const item = {
+      id: getImportValue(row, ["id", "ID"]) || uid(type),
+      ...row
+    };
+    upsertCollection(state[collectionName], item, existing => existing.id === item.id);
+  });
+
+  return rows.length;
+}
+
+async function importWorkbook(workbook) {
+  const counts = {};
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      defval: "",
+      raw: false
+    });
+
+    if (!rows.length) continue;
+
+    const type = detectImportType(sheetName, rows);
+    counts[type] = (counts[type] || 0) + await importRowsByType(type, rows);
+  }
+
+  saveState();
+  render();
+
+  const summary = Object.entries(counts)
+    .filter(([, count]) => count)
+    .map(([type, count]) => `${count} ${type}`)
+    .join(", ");
+
+  toast(summary ? `Imported ${summary}.` : "No importable rows found.");
 }
 
 function importData(file) {
@@ -3378,7 +4067,7 @@ function importData(file) {
     const reader =
       new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
 
       try {
 
@@ -3435,7 +4124,7 @@ function importData(file) {
     const reader =
       new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
 
       try {
 
@@ -3447,30 +4136,7 @@ function importData(file) {
             }
           );
 
-        const sheet =
-          workbook.Sheets[
-            workbook.SheetNames[0]
-          ];
-
-        const rows =
-          XLSX.utils.sheet_to_json(
-            sheet,
-            {
-              defval: "",
-              raw: false
-            }
-          );
-
-        if (!rows.length) {
-
-          toast(
-            "Import file is empty."
-          );
-
-          return;
-        }
-
-        importFreelancers(rows);
+        await importWorkbook(workbook);
 
       } catch (err) {
 
@@ -3497,7 +4163,7 @@ function importData(file) {
 
 }
 
-function importFreelancers(rows) {
+function importFreelancers(rows, { silent = false } = {}) {
 
   const normalizeColumnName = (value) =>
     String(value || "")
@@ -3601,11 +4267,13 @@ function importFreelancers(rows) {
 
   if (!importedFreelancers.length) {
 
-    toast(
-      "No valid freelancer rows found."
-    );
+    if (!silent) {
+      toast(
+        "No valid freelancer rows found."
+      );
+    }
 
-    return;
+    return 0;
 
   }
 
@@ -3618,9 +4286,13 @@ function importFreelancers(rows) {
 
   render();
 
-  toast(
-    `${importedFreelancers.length} freelancers imported`
-  );
+  if (!silent) {
+    toast(
+      `${importedFreelancers.length} freelancers imported`
+    );
+  }
+
+  return importedFreelancers.length;
 
 }
 

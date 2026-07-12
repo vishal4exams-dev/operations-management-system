@@ -1252,6 +1252,30 @@ box-shadow:var(--shadow-md);
   gap:12px;
 }
 
+.report-filters{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  margin-bottom:14px;
+}
+
+.report-filters label{
+  display:grid;
+  gap:6px;
+  color:var(--muted);
+  font-weight:700;
+}
+
+.report-filters input,
+.report-filters select{
+  min-height:42px;
+  border:1px solid #dbe3ef;
+  border-radius:8px;
+  padding:0 12px;
+  background:#fff;
+  color:var(--ink);
+}
+
 .team-node{
   padding:14px;
   border:1px solid #e2e8f0;
@@ -1434,7 +1458,8 @@ box-shadow:var(--shadow-md);
   .team-layout,
   .reports-layout,
   .profile-grid,
-  .approval-actions{
+  .approval-actions,
+  .report-filters{
     grid-template-columns:1fr;
   }
 

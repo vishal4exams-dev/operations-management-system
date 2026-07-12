@@ -171,6 +171,17 @@
                 <h3>Team reports</h3>
                 <span id="missingReportBadge" class="pill warning">0 missing</span>
               </div>
+              <div class="report-filters">
+                <label>Date<input id="reportDateFilter" type="date"></label>
+                <label>Role
+                  <select id="reportRoleFilter">
+                    <option value="all">All roles</option>
+                    <option value="associate">Associate</option>
+                    <option value="executive">Executive</option>
+                  </select>
+                </label>
+                <label>Member<select id="reportMemberFilter"></select></label>
+              </div>
               <div id="dailyReportList" class="report-list"></div>
             </section>
           </div>
