@@ -22,11 +22,6 @@
           <button class="auth-tab active" id="showLoginBtn" type="button">Login</button>
           <button class="auth-tab" id="showSignupBtn" type="button">Signup</button>
         </div>
-        <button class="google-btn" id="googleLoginBtn" type="button">
-          <span class="google-mark" aria-hidden="true">G</span>
-          Continue with Google
-        </button>
-        <div class="auth-divider"><span>or</span></div>
         <form class="login-card" id="loginForm">
           <label>Email<input id="loginEmail" type="email" autocomplete="username" required placeholder="you@yourdomain.com" /></label>
           <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Your password" /></label>
@@ -44,6 +39,11 @@
           <label>Confirm password<input id="confirmNewPassword" type="password" autocomplete="new-password" required minlength="6" placeholder="Re-enter password" /></label>
           <button class="primary-btn" type="submit">Update password</button>
         </form>
+        <div class="auth-divider"><span>or</span></div>
+          <button class="google-btn" id="googleLoginBtn" type="button">
+          <span class="google-mark" aria-hidden="true">G</span>
+          Continue with Google
+        </button>
       </div>
     </section>
 
