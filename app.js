@@ -73,6 +73,12 @@ function createLocalSupabaseFallback() {
         },
         error: null
       }),
+      signInWithOAuth: async () => ({
+        data: null,
+        error: {
+          message: "Google login needs Supabase Auth to be configured."
+        }
+      }),
       signOut: async () => ({ error: null }),
       resetPasswordForEmail: async () => ({ error: null }),
       exchangeCodeForSession: async () => ({ error: null }),
@@ -93,6 +99,17 @@ function getPasswordResetRedirectUrl() {
   url.search = "?reset=password";
   url.hash = "";
   return url.toString();
+}
+
+function getAuthRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function getAuthCodeFromUrl() {
+  return new URLSearchParams(window.location.search).get("code");
 }
 
 function isPasswordResetMode() {
@@ -120,7 +137,7 @@ async function ensurePasswordRecoverySession() {
     return true;
   }
 
-  const code = new URLSearchParams(window.location.search).get("code");
+  const code = getAuthCodeFromUrl();
 
   if (!code || typeof supabaseClient.auth.exchangeCodeForSession !== "function") {
     return true;
@@ -140,6 +157,19 @@ async function ensurePasswordRecoverySession() {
 
   supabaseClient.auth.getSession()
 .then(async ({ data }) => {
+
+  if (!data.session && getAuthCodeFromUrl() && !isPasswordResetMode() &&
+    typeof supabaseClient.auth.exchangeCodeForSession === "function") {
+    const result =
+      await supabaseClient.auth.exchangeCodeForSession(window.location.href);
+
+    if (result.error) {
+      toast(result.error.message);
+    } else if (result.data?.session) {
+      data = result.data;
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }
 
   if (isPasswordResetMode()) {
     if (!data.session) {
@@ -319,6 +349,26 @@ document.getElementById("showSignupBtn").addEventListener("click", () => setAuth
 if (isPasswordResetMode()) {
   setAuthMode("reset");
 }
+
+document.getElementById("googleLoginBtn")
+?.addEventListener("click", async () => {
+
+  const { error } =
+    await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: getAuthRedirectUrl(),
+        queryParams: {
+          prompt: "select_account"
+        }
+      }
+    });
+
+  if (error) {
+    toast(error.message);
+  }
+
+});
 
 document.getElementById("loginForm")
 .addEventListener("submit", async (event) => {
@@ -1023,6 +1073,8 @@ function updateAuthView() {
 function setAuthMode(mode) {
   const isSignup = mode === "signup";
   const isReset = mode === "reset";
+  document.getElementById("googleLoginBtn")?.classList.toggle("hidden", isReset);
+  document.querySelector(".auth-divider")?.classList.toggle("hidden", isReset);
   document.getElementById("signupForm").classList.toggle("hidden", !isSignup);
   document.getElementById("resetPasswordForm")?.classList.toggle("hidden", !isReset);
   document.getElementById("loginForm").classList.toggle("hidden", isSignup || isReset);

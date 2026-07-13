@@ -31,6 +31,12 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body{
   margin:0;
   background:
@@ -104,6 +110,52 @@ body{
 
 .login-card.hidden {
   display: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.google-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.google-mark {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #dbe3ef;
+  border-radius: 50%;
+  color: #2563eb;
+  font-weight: 900;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
 }
 
 .app-shell.locked {
@@ -362,9 +414,10 @@ p {
 
 h1{
   margin-bottom:6px;
-  font-size:42px;
+  font-size:clamp(30px,4vw,42px);
   line-height:1.1;
-  white-space:nowrap;
+  white-space:normal;
+  overflow-wrap:anywhere;
 }
 
 h2 {
@@ -619,7 +672,7 @@ textarea {
 }
 
 .dashboard-grid > .panel:first-child{
-  height:700px;
+  max-height:700px;
   overflow-y:auto;
   overflow-x:hidden;
 }
@@ -628,7 +681,7 @@ textarea {
   width:100%;
   max-width:320px;
 
-  height:700px;
+  max-height:700px;
 
   overflow-y:auto;
   overflow-x:hidden;
@@ -1211,6 +1264,272 @@ box-shadow:var(--shadow-md);
 .health-delayed{
   color:#dc2626;
   font-weight:700;
+}
+
+@media (max-width: 760px) {
+  body {
+    background:
+      radial-gradient(circle at top right,#dbeafe 0%,transparent 34%),
+      radial-gradient(circle at bottom left,#ccfbf1 0%,transparent 34%),
+      #f8fafc;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr !important;
+    min-height: 100svh;
+  }
+
+  .app-shell:has(.sidebar:hover) {
+    grid-template-columns: 1fr !important;
+  }
+
+  .sidebar,
+  .sidebar:hover {
+    width: 100%;
+    height: calc(74px + env(safe-area-inset-bottom));
+    position: fixed;
+    inset: auto 0 0 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+
+  .sidebar .brand,
+  .sidebar-note,
+  .sidebar:hover .sidebar-note {
+    display: none !important;
+  }
+
+  .nav {
+    flex-direction: row;
+    gap: 8px;
+    min-width: max-content;
+    margin: 0;
+    overflow: visible;
+  }
+
+  .nav-btn,
+  .sidebar:hover .nav-btn {
+    width: 52px;
+    min-width: 52px;
+    height: 52px;
+    min-height: 52px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    border-radius: 16px;
+  }
+
+  .nav-btn:hover {
+    transform: none;
+  }
+
+  .nav-label,
+  .sidebar:hover .nav-label {
+    display: none !important;
+  }
+
+  .main {
+    width: 100%;
+    padding: 12px 12px calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .main > header {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    align-items: stretch;
+    padding: 14px;
+    margin: 0 0 14px;
+    border-radius: 8px;
+    background: rgba(204,251,241,.84);
+    backdrop-filter: blur(14px);
+  }
+
+  .main > header > div:first-child {
+    min-width: 0;
+  }
+
+  .main > header h1 {
+    font-size: clamp(28px, 9vw, 38px);
+    line-height: 1.08;
+  }
+
+  .main > header p {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .top-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100% !important;
+    margin-left: 0;
+  }
+
+  .top-actions > *,
+  .filters > *,
+  .search-wrap {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .welcome-user,
+  #installBtn {
+    grid-column: 1 / -1;
+  }
+
+  .section-head,
+  .panel-head,
+  .report-card header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .section-head h2,
+  .section-head h2[style],
+  #team-heading,
+  #reports-heading,
+  #freelancers-heading,
+  #tasks-heading {
+    font-size: 26px !important;
+    line-height: 1.15;
+  }
+
+  .search-wrap {
+    margin-left: 0;
+  }
+
+  .metrics,
+  .dashboard-grid,
+  .notification-layout,
+  .workflow-columns,
+  .kanban,
+  .form-grid,
+  #operationsGrid,
+  .freelancer-grid,
+  .team-layout,
+  .reports-layout,
+  .profile-grid,
+  .approval-actions,
+  .report-filters {
+    grid-template-columns: minmax(0,1fr) !important;
+  }
+
+  .dashboard-grid,
+  .notification-layout,
+  .workflow-columns,
+  .kanban,
+  .metrics {
+    gap: 12px;
+  }
+
+  .dashboard-grid > .panel:first-child,
+  .dashboard-grid > .panel:last-child,
+  .notification-layout .panel:last-child {
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    justify-self: stretch;
+  }
+
+  .panel,
+  .metric,
+  .freelancer-card,
+  .task-card,
+  .operation-card,
+  .filters {
+    border-radius: 8px;
+  }
+
+  .panel,
+  .operation-card {
+    padding: 14px;
+  }
+
+  .filters {
+    display: grid;
+    grid-template-columns: minmax(0,1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .workflow-column {
+    min-height: auto;
+  }
+
+  .task-actions {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  .team-children {
+    padding-left: 10px;
+  }
+
+  .report-card dl,
+  .profile-grid dl,
+  .freelancer-card dl {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  .approval-card,
+  .team-node,
+  .report-card,
+  .notification-item,
+  .control-tile {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .control-tile,
+  .profile-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  dialog {
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+  }
+
+  .modal-form {
+    padding: 14px;
+  }
+
+  menu {
+    flex-direction: column-reverse;
+  }
+
+  menu > button {
+    width: 100%;
+  }
+
+  .toast {
+    right: 12px;
+    bottom: calc(88px + env(safe-area-inset-bottom));
+    left: 12px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .auth-wrap {
+    padding: 18px;
+  }
+
+  .top-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .section-subtitle{
