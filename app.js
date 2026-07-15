@@ -13,6 +13,7 @@ const supabaseClient =
     : createLocalSupabaseFallback();
 
 const EMAIL_FUNCTION_NAME = "send-email";
+const WHATSAPP_FUNCTION_NAME = "send-whatsapp";
 
   const STORAGE_KEY = "freelancer-management-system-v1";
 const SESSION_KEY = "freelancer-management-session-v1";
@@ -32,6 +33,11 @@ const PROFILES_TABLE = "profiles";
 const DAILY_REPORTS_TABLE = "daily_reports";
 const NOTIFICATIONS_TABLE = "notifications";
 const DAILY_REPORT_DEADLINE_HOUR = 19;
+const DEMO_PROFILE_IDS = new Set(["user-manager-1", "user-associate-1", "user-executive-1"]);
+const DEMO_FREELANCER_IDS = new Set(["fr-1"]);
+const DEMO_TASK_IDS = new Set(["task-1"]);
+const DEMO_REPORT_IDS = new Set(["report-1"]);
+const DEMO_NOTIFICATION_IDS = new Set(["note-1", "note-2"]);
 
 let approvalRequestsSyncing = false;
 let approvalRequestsLoaded = false;
@@ -203,92 +209,13 @@ const demoState = {
       email: "vishal4exams@gmail.com",
       role: "admin",
       reportsTo: ""
-    },
-    {
-      id: "user-manager-1",
-      name: "Operations Manager",
-      email: "manager@yourdomain.com",
-      role: "manager",
-      reportsTo: "user-admin"
-    },
-    {
-      id: "user-associate-1",
-      name: "Associate Lead",
-      email: "associate@yourdomain.com",
-      role: "associate",
-      reportsTo: "user-manager-1"
-    },
-    {
-      id: "user-executive-1",
-      name: "Executive Desk",
-      email: "executive@yourdomain.com",
-      role: "executive",
-      reportsTo: "user-manager-1"
     }
   ],
   operations: [],
-  freelancers: [
-    {
-      id: "fr-1",
-      ownerId: "user-associate-1",
-      name: "Aarav Mehta",
-      email: "aarav.mehta@example.com",
-      mobile: "919999999999",
-      role: "UI Designer",
-      state: "Maharashtra",
-      district: "Pune",
-      language: "Marathi, Hindi",
-      rate: "$45/hr",
-      status: "Available"
-    }
-  ],
-  dailyReports: [
-    {
-      id: "report-1",
-      userId: "user-associate-1",
-      date: new Date().toISOString().slice(0, 10),
-      todayWork: "Reviewed active freelancer assignments and followed up on pending QC.",
-      tomorrowPlan: "Close review batches and redistribute delayed work.",
-      roadblocks: "Awaiting one client clarification.",
-      filesReviewed: 42,
-      createdAt: new Date().toISOString()
-    }
-  ],
-  tasks: [
-    {
-      id: "task-1",
-      taskType: "Others",
-      batchName: "Website audit - June 2026",
-      freelancerId: "fr-1",
-      startDate: "2026-06-02",
-      deadlineDate: "2026-06-08",
-      taskCount: 12,
-      payPerTask: 55,
-      status: "Review",
-      paymentStatus: "Pending approval",
-      brief: "Website audit report: audit the homepage, pricing page, and checkout path. Include priority fixes."
-    }
-  ],
-  notifications: [
-    {
-      id: "note-1",
-      type: "Task assigned",
-      message: "Client portal implementation assigned to Nisha Rao.",
-      taskId: "task-3",
-      freelancerId: "fr-2",
-      read: false,
-      createdAt: "2026-06-02T08:00:00.000Z"
-    },
-    {
-      id: "note-2",
-      type: "Payment pending",
-      message: "Website audit report is awaiting payment approval.",
-      taskId: "task-1",
-      freelancerId: "fr-3",
-      read: false,
-      createdAt: "2026-06-01T12:30:00.000Z"
-    }
-  ],
+  freelancers: [],
+  dailyReports: [],
+  tasks: [],
+  notifications: [],
   emailTemplate: {
     subject: "New task assigned: {{taskType}}",
     body:
@@ -303,6 +230,7 @@ const demoState = {
 let state = loadState();
 state.operations = state.operations || [];
 let deadlineEmailQueueRunning = false;
+let pendingProfileAvatarUrl = null;
 
 const els = {
   navButtons: document.querySelectorAll(".nav-btn"),
@@ -542,6 +470,13 @@ document
 
 document.getElementById("logoutBtn").addEventListener("click", async () => {
 
+  if (!confirmWarning(
+    "Logout?",
+    "You will leave this session and return to the login screen."
+  )) {
+    return;
+  }
+
   await supabaseClient.auth.signOut();
 
   sessionStorage.removeItem(SESSION_KEY);
@@ -607,6 +542,13 @@ document.getElementById("saveTemplateBtn").addEventListener("click", () => {
 });
 
 document.getElementById("clearNotificationsBtn").addEventListener("click", () => {
+  if (!confirmWarning(
+    "Clear read notifications?",
+    "This will permanently remove every notification already marked as read."
+  )) {
+    return;
+  }
+
   state.notifications = state.notifications.filter((note) => !note.read);
   saveState();
   render();
@@ -632,10 +574,19 @@ document.getElementById("markPaidBtn").addEventListener("click", async () => {
 document.getElementById("exportDataBtn")?.addEventListener("click",exportData);
 
 document.getElementById("importDataBtn")?.addEventListener("click",() =>
-  document.getElementById(
-        "importFile"
-      )
-      .click()
+  {
+    if (!confirmWarning(
+      "Import data?",
+      "Imported files can add new records and update matching existing records. Export a backup first if you need one."
+    )) {
+      return;
+    }
+
+    document.getElementById(
+          "importFile"
+        )
+        .click();
+  }
 );
 
 document
@@ -705,9 +656,15 @@ document.getElementById("employeeForm")?.addEventListener("submit", async (event
   const data = Object.fromEntries(
     new FormData(event.currentTarget)
   );
+  data.mobile = String(data.mobile || "").trim();
 
   if (!data.reportsTo && data.role !== "admin") {
     toast("Select who this employee reports to.");
+    return;
+  }
+
+  if (data.mobile && !isTenDigitMobile(data.mobile)) {
+    toast("WhatsApp number must be exactly 10 digits.");
     return;
   }
 
@@ -744,6 +701,71 @@ document.getElementById("employeeForm")?.addEventListener("submit", async (event
   saveState();
   render();
   document.getElementById("employeeModal").close();
+});
+
+document.getElementById("profilePhotoInput")?.addEventListener("change", async (event) => {
+  const file = event.currentTarget.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    toast("Choose an image file.");
+    event.currentTarget.value = "";
+    return;
+  }
+
+  pendingProfileAvatarUrl = await readFileAsDataUrl(file);
+  renderProfileSettings();
+});
+
+document.querySelectorAll("#profileMobileInput, #employeeForm [name='mobile']").forEach(input => {
+  input.addEventListener("input", () => {
+    input.value = normalizeTenDigitMobile(input.value);
+  });
+});
+
+document.getElementById("removeProfilePhotoBtn")?.addEventListener("click", () => {
+  pendingProfileAvatarUrl = "";
+  const input = document.getElementById("profilePhotoInput");
+  if (input) input.value = "";
+  renderProfileSettings();
+});
+
+document.getElementById("profileSettingsForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const profile = getCurrentProfile();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const mobile = String(data.mobile || "").trim();
+  const nextProfile = {
+    ...profile,
+    name: String(data.name || profile.name || "").trim(),
+    mobile,
+    avatarUrl: pendingProfileAvatarUrl === null ? profile.avatarUrl : pendingProfileAvatarUrl
+  };
+
+  if (!nextProfile.name) {
+    toast("Enter your name.");
+    return;
+  }
+
+  if (nextProfile.mobile && !isTenDigitMobile(nextProfile.mobile)) {
+    toast("WhatsApp number must be exactly 10 digits.");
+    return;
+  }
+
+  if (!(await saveProfileToSupabase(nextProfile))) {
+    toast(profilesSyncError || "Profile could not be saved to Supabase.");
+    return;
+  }
+
+  Object.assign(profile, nextProfile);
+  pendingProfileAvatarUrl = null;
+  const photoInput = document.getElementById("profilePhotoInput");
+  if (photoInput) photoInput.value = "";
+  sessionStorage.setItem(SESSION_NAME_KEY, profile.name);
+  saveState();
+  render();
+  toast("Profile updated.");
 });
 
 els.dailyReportForm?.addEventListener("submit", async (event) => {
@@ -823,7 +845,21 @@ document.getElementById("taskForm").addEventListener("submit", async (event) => 
         taskCount: Number(data.taskCount)
       };
 
+      await addNotification({
+        type: "Task updated",
+        message: `${getTaskLabel(state.tasks[index])} was updated.`,
+        taskId: state.tasks[index].id,
+        freelancerId: state.tasks[index].freelancerId,
+        metaKey: `task-updated-${state.tasks[index].id}-${Date.now()}`
+      }, {
+        browser: true
+      });
+
       await sendTaskUpdateEmail(
+        state.tasks[index],
+        previousTask
+      );
+      await sendTaskUpdateWhatsApp(
         state.tasks[index],
         previousTask
       );
@@ -850,15 +886,17 @@ document.getElementById("taskForm").addEventListener("submit", async (event) => 
 
     state.tasks.push(task);
 
-    createAssignmentNotification(task);
+    await createAssignmentNotification(task);
 
     const emailSent =
       await sendTaskAssignmentEmail(task);
+    const whatsappSent =
+      await sendTaskAssignmentWhatsApp(task);
 
     toast(
-      emailSent
-        ? "Task assigned and email sent."
-        : "Task assigned, but email could not be sent."
+      emailSent || whatsappSent
+        ? "Task assigned and automation sent."
+        : "Task assigned, but email/WhatsApp could not be sent."
     );
   }
 
@@ -929,8 +967,10 @@ function normalizeState(nextState = {}) {
       ...profile,
       role: profile.role || "executive",
       reportsTo: profile.reportsTo || "",
+      mobile: profile.mobile || profile.phone || profile.whatsapp || "",
+      avatarUrl: profile.avatarUrl || profile.avatar_url || "",
       status: profile.status || "active"
-    }))
+    })).filter(profile => !DEMO_PROFILE_IDS.has(profile.id))
     : clone(demoState.profiles);
 
   normalized.approvalRequests = Array.isArray(nextState.approvalRequests)
@@ -951,11 +991,6 @@ function normalizeState(nextState = {}) {
   }
   if (seededAdmin && sameEmail(seededAdmin.email, "admin@yourdomain.com")) {
     seededAdmin.email = "vishal4exams@gmail.com";
-  }
-
-  const seededExecutive = normalized.profiles.find(profile => profile.id === "user-executive-1");
-  if (seededExecutive?.reportsTo === "user-associate-1") {
-    seededExecutive.reportsTo = "user-manager-1";
   }
 
   const fallbackOwner =
@@ -984,7 +1019,7 @@ function normalizeState(nextState = {}) {
       state: person.state || "",
       district: person.district || "",
       language: person.language || ""
-    }))
+    })).filter(person => !DEMO_FREELANCER_IDS.has(person.id))
     : [];
 
   normalized.emailTemplate = {
@@ -1013,11 +1048,14 @@ function normalizeState(nextState = {}) {
     payPerTask: Number(task.payPerTask ?? task.amount ?? 0),
     startDate: task.startDate || new Date().toISOString().slice(0, 10),
     deadlineDate: task.deadlineDate || task.due || new Date().toISOString().slice(0, 10)
-  }))
+  })).filter(task => !DEMO_TASK_IDS.has(task.id))
     : [];
 
   normalized.notifications = Array.isArray(nextState.notifications)
     ? nextState.notifications
+      .filter(note => !DEMO_NOTIFICATION_IDS.has(note.id))
+      .filter(note => !DEMO_TASK_IDS.has(note.taskId))
+      .filter(note => !DEMO_FREELANCER_IDS.has(note.freelancerId))
     : [];
 
   normalized.dailyReports = Array.isArray(nextState.dailyReports)
@@ -1026,6 +1064,8 @@ function normalizeState(nextState = {}) {
       roadblocks: report.roadblocks || "None",
       filesReviewed: Number(report.filesReviewed || 0)
     }))
+      .filter(report => !DEMO_REPORT_IDS.has(report.id))
+      .filter(report => !DEMO_PROFILE_IDS.has(report.userId))
     : [];
 
   normalized.emailEvents =
@@ -1123,30 +1163,44 @@ function canSyncNotifications() {
   return typeof supabaseClient.from === "function";
 }
 
-function profileToRow(profile) {
-  return {
+function profileToRow(profile, { includeAvatar = true } = {}) {
+  const row = {
     id: profile.id,
     name: profile.name || "",
     email: profile.email || "",
+    mobile: profile.mobile || "",
     role: profile.role || "executive",
     reports_to: profile.reportsTo || "",
     status: profile.status || "active",
     created_at: profile.createdAt || new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
+
+  if (includeAvatar) {
+    row.avatar_url = profile.avatarUrl || "";
+  }
+
+  return row;
 }
 
 function profileFromRow(row) {
-  return {
+  const profile = {
     id: row.id,
     name: row.name || "",
     email: row.email || "",
+    mobile: row.mobile || "",
     role: row.role || "executive",
     reportsTo: row.reports_to || "",
     status: row.status || "active",
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || ""
   };
+
+  if (row.avatar_url !== undefined) {
+    profile.avatarUrl = row.avatar_url || "";
+  }
+
+  return profile;
 }
 
 function mergeProfiles(profiles) {
@@ -1239,6 +1293,30 @@ async function saveProfileToSupabase(profile) {
     profilesLoaded = false;
     return true;
   } catch (error) {
+    const message = String(error?.message || "");
+
+    if (message.includes("avatar_url")) {
+      try {
+        const { error: retryError } = await supabaseClient
+          .from(PROFILES_TABLE)
+          .upsert(profileToRow(profile, { includeAvatar: false }), {
+            onConflict: "id"
+          });
+
+        if (retryError) throw retryError;
+        profilesSyncError = "";
+        profilesLoaded = false;
+        console.warn("Profile photo skipped until avatar_url column is available in Supabase.");
+        return true;
+      } catch (retryError) {
+        console.warn("Profile Supabase retry failed", retryError);
+        profilesSyncError =
+          retryError?.message ||
+          "Profiles table is not reachable. Run the Supabase live sync SQL.";
+        return false;
+      }
+    }
+
     console.warn("Profile Supabase sync failed", error);
     profilesSyncError =
       error?.message ||
@@ -1572,6 +1650,8 @@ function getManagerForProfile(profile) {
 }
 
 async function notifyReportSubmitted(report, profile = getCurrentProfile()) {
+  const manager = getManagerForProfile(profile);
+
   await addNotification({
     type: "Daily report submitted",
     message: `Thank you ${profile.name}, your ${formatDate(report.date)} report has been submitted.`,
@@ -1580,6 +1660,45 @@ async function notifyReportSubmitted(report, profile = getCurrentProfile()) {
   }, {
     browser: true
   });
+
+  if (manager?.id && manager.id !== profile.id) {
+    const message = `${profile.name} submitted the ${formatDate(report.date)} daily report. Files reviewed: ${Number(report.filesReviewed || 0)}.`;
+
+    await addNotification({
+      type: "Daily report submitted",
+      message,
+      targetProfileId: manager.id,
+      metaKey: `daily-report-submitted-${report.date}-${profile.id}-${manager.id}`
+    }, {
+      browser: true
+    });
+
+    await sendRecipientEmail({
+      recipient: manager,
+      subject: `Daily report submitted: ${profile.name}`,
+      body: [
+        `Hi ${getRecipientName(manager)},`,
+        "",
+        message,
+        "",
+        `Today's work: ${report.todayWork || "-"}`,
+        `Tomorrow: ${report.tomorrowPlan || "-"}`,
+        `Roadblocks: ${report.roadblocks || "None"}`,
+        "",
+        `Thanks,`,
+        state.emailSettings.senderName
+      ].join("\n"),
+      eventKey: `daily-report-submitted-${report.date}-${profile.id}-${manager.id}`,
+      silent: true
+    });
+
+    await sendRecipientWhatsApp({
+      recipient: manager,
+      message,
+      eventKey: `daily-report-submitted-${report.date}-${profile.id}-${manager.id}`,
+      silent: true
+    });
+  }
 }
 
 async function notifyMissingDailyReport(profile, date) {
@@ -1594,6 +1713,31 @@ async function notifyMissingDailyReport(profile, date) {
       metaKey: `daily-report-missing-${date}-${profile.id}-${targetProfileId}`
     }, {
       browser: true
+    });
+
+    const recipient = state.profiles.find(item => item.id === targetProfileId);
+    const message = `${profile.name} has not submitted the ${formatDate(date)} daily report by 7 PM.`;
+
+    await sendRecipientEmail({
+      recipient,
+      subject: `Daily report missing: ${profile.name}`,
+      body: [
+        `Hi ${getRecipientName(recipient)},`,
+        "",
+        message,
+        "",
+        `Thanks,`,
+        state.emailSettings.senderName
+      ].join("\n"),
+      eventKey: `daily-report-missing-${date}-${profile.id}-${targetProfileId}`,
+      silent: true
+    });
+
+    await sendRecipientWhatsApp({
+      recipient,
+      message,
+      eventKey: `daily-report-missing-${date}-${profile.id}-${targetProfileId}`,
+      silent: true
     });
   }
 }
@@ -1803,12 +1947,13 @@ async function createApprovalRequest({ name, email, authUserId = "" }) {
   };
 
   state.approvalRequests.push(request);
-  state.notifications.push({
-    id: uid("note"),
+
+  await addNotification({
     type: "Signup approval",
     message: `${request.name} requested access and needs role assignment.`,
-    read: false,
-    createdAt: new Date().toISOString()
+    metaKey: `signup-approval-${request.id}`
+  }, {
+    browser: true
   });
 
   saveState();
@@ -1845,11 +1990,24 @@ async function applyLoggedInUser(user) {
   }
 
   state.currentProfileId = profile.id;
+  if (
+    profile.email &&
+    (!state.emailSettings.senderEmail || state.emailSettings.senderEmail === demoState.emailSettings.senderEmail)
+  ) {
+    state.emailSettings.senderEmail = profile.email;
+  }
+  if (
+    profile.name &&
+    (!state.emailSettings.senderName || state.emailSettings.senderName === demoState.emailSettings.senderName)
+  ) {
+    state.emailSettings.senderName = profile.name;
+  }
   sessionStorage.setItem(SESSION_KEY, user?.id || profile.id);
   sessionStorage.setItem(SESSION_EMAIL_KEY, profile.email);
   sessionStorage.setItem(SESSION_NAME_KEY, profile.name);
   saveState();
   render();
+  ensureBrowserNotificationPermission();
   startDailyReportDeadlineMonitor();
   updateAuthView();
   return true;
@@ -1864,6 +2022,23 @@ function uid(prefix) {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeTenDigitMobile(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 10);
+}
+
+function isTenDigitMobile(value) {
+  return /^\d{10}$/.test(String(value || ""));
 }
 
 function setView(view) {
@@ -1914,6 +2089,14 @@ function getVisibleProfileIds() {
     return state.profiles.map(item => item.id);
   }
 
+  if (profile.role === "manager") {
+    return getDescendantProfileIds(profile.id);
+  }
+
+  if (["associate", "executive"].includes(profile.role)) {
+    return [profile.id];
+  }
+
   return getDescendantProfileIds(profile.id);
 }
 
@@ -1948,6 +2131,22 @@ function getScopedFreelancers() {
 function getScopedTasks() {
   const freelancerIds = new Set(getScopedFreelancers().map(person => person.id));
   return state.tasks.filter(task => freelancerIds.has(task.freelancerId));
+}
+
+function getScopedOperations() {
+  const current = getCurrentProfile();
+
+  if (current.role === "admin") {
+    return state.operations;
+  }
+
+  const operationIds = new Set(
+    getScopedTasks()
+      .map(task => task.operationId)
+      .filter(Boolean)
+  );
+
+  return state.operations.filter(op => operationIds.has(op.id));
 }
 
 function getTodayKey() {
@@ -1998,8 +2197,56 @@ function renderWelcomeUser() {
   els.welcomeUser.title = roleLabels[profile.role] || profile.role || "";
 }
 
+function getProfileInitials(profile) {
+  const source = String(profile?.name || profile?.email || "?").trim();
+  return source
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(part => part.charAt(0).toUpperCase())
+    .join("") || "?";
+}
+
+function renderProfilePhoto(target, profile, sizeClass = "") {
+  if (!target) return;
+
+  const avatarClass = ["profile-avatar", sizeClass].filter(Boolean).join(" ");
+  target.innerHTML = profile.avatarUrl
+    ? `<img class="${avatarClass}" src="${escapeHtml(profile.avatarUrl)}" alt="">`
+    : `<span class="${avatarClass}">${escapeHtml(getProfileInitials(profile))}</span>`;
+}
+
+function renderProfileSettings() {
+  const form = document.getElementById("profileSettingsForm");
+  if (!form) return;
+
+  const profile = getCurrentProfile();
+  const nameInput = document.getElementById("profileNameInput");
+  const emailInput = document.getElementById("profileEmailInput");
+  const mobileInput = document.getElementById("profileMobileInput");
+  const roleInput = document.getElementById("profileRoleInput");
+  const nameLabel = document.getElementById("profileSettingsName");
+  const roleLabel = document.getElementById("profileSettingsRole");
+
+  if (nameInput) nameInput.value = profile.name || "";
+  if (emailInput) emailInput.value = profile.email || "";
+  if (mobileInput) mobileInput.value = profile.mobile || "";
+  if (roleInput) roleInput.value = roleLabels[profile.role] || profile.role || "";
+  if (nameLabel) nameLabel.textContent = profile.name || "Your profile";
+  if (roleLabel) roleLabel.textContent = `${roleLabels[profile.role] || profile.role || ""} account`;
+
+  renderProfilePhoto(
+    document.getElementById("profilePhotoPreview"),
+    {
+      ...profile,
+      avatarUrl: pendingProfileAvatarUrl === null ? profile.avatarUrl : pendingProfileAvatarUrl
+    },
+    "profile-avatar-lg"
+  );
+}
+
 function render() {
   renderWelcomeUser();
+  renderProfileSettings();
   renderRoleAssignmentAccess();
   renderApprovalRequests();
   renderMetrics();
@@ -2096,50 +2343,90 @@ function renderTeam() {
   const visibleIds = new Set(getVisibleProfileIds());
   const visibleProfiles = state.profiles.filter(profile => visibleIds.has(profile.id));
 
-  const renderNode = (profile) => {
-    const children = state.profiles
-      .filter(child => child.reportsTo === profile.id && visibleIds.has(child.id))
-      .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
-
+  const getProfileReportStatus = (profile) => {
     const report = getReportFor(profile.id);
-    const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id).length;
     const filesReviewed = report ? Number(report.filesReviewed || 0) : 0;
-    const reportStatus = !showReportStatus
-      ? "Activity visible"
-      : isReportRequiredProfile(profile)
+    const requiresReport = isReportRequiredProfile(profile);
+    return !showReportStatus
+      ? { label: "Activity visible", tone: "neutral" }
+      : requiresReport
       ? report
-        ? `${filesReviewed} files today`
-        : "Report missing"
-      : "Reviews team reports";
+        ? { label: `${filesReviewed} files today`, tone: "ok" }
+        : { label: "Report missing", tone: "missing" }
+      : { label: "Reviews team reports", tone: "reviewer" };
+  };
+
+  const renderMemberCard = (profile) => {
+    const children = state.profiles
+      .filter(child => child.reportsTo === profile.id && visibleIds.has(child.id));
+    const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id).length;
+    const reportStatus = getProfileReportStatus(profile);
+    const directReportsLabel = `${children.length} direct report${children.length === 1 ? "" : "s"}`;
+    const managerName = profile.reportsTo ? getProfileName(profile.reportsTo) : "Top level";
+    const canRemoveMember =
+      current.role === "admin" &&
+      profile.role !== "admin" &&
+      profile.id !== current.id;
 
     return `
-      <article class="team-node role-${escapeHtml(profile.role)}">
-        <div>
-          <button class="link-btn team-profile-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
-            ${escapeHtml(profile.name)}
-          </button>
-          <span class="pill">${escapeHtml(roleLabels[profile.role] || profile.role)}</span>
+      <article class="team-node role-${escapeHtml(profile.role)} status-${reportStatus.tone}">
+        <div class="team-node-main">
+          <span class="team-avatar" aria-hidden="true">
+            ${profile.avatarUrl ? `<img src="${escapeHtml(profile.avatarUrl)}" alt="">` : escapeHtml(getProfileInitials(profile))}
+          </span>
+          <div class="team-member-copy">
+            <div class="team-node-head">
+              <button class="link-btn team-profile-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
+                ${escapeHtml(profile.name)}
+              </button>
+              <span class="pill role-pill">${escapeHtml(roleLabels[profile.role] || profile.role)}</span>
+            </div>
+            <p>${escapeHtml(profile.email || "")}</p>
+            <div class="team-reports-to">Reports to: <strong>${escapeHtml(managerName)}</strong></div>
+          </div>
         </div>
-        <p>${escapeHtml(profile.email || "")}</p>
         <div class="team-stats">
-          <span>${ownFreelancers} freelancers</span>
-          <span>${reportStatus}</span>
+          <span>${directReportsLabel}</span>
+          <span>${ownFreelancers} freelancer${ownFreelancers === 1 ? "" : "s"}</span>
+          <span class="team-status">${reportStatus.label}</span>
         </div>
-        ${children.length ? `<div class="team-children">${children.map(renderNode).join("")}</div>` : ""}
+        ${canRemoveMember ? `
+          <button class="danger-btn team-remove-btn" type="button" onclick="removeApprovedMember('${profile.id}')">
+            Remove member
+          </button>
+        ` : ""}
       </article>
     `;
   };
 
-  const roots = visibleProfiles
-    .filter(profile => profile.id === current.id || !visibleIds.has(profile.reportsTo))
-    .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+  const hierarchySections = roleOrder
+    .map(role => {
+      const members = visibleProfiles
+        .filter(profile => profile.role === role)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      if (!members.length) return "";
+
+      return `
+        <section class="team-level-section role-${escapeHtml(role)}">
+          <div class="team-level-header">
+            <span>${escapeHtml(roleLabels[role] || role)}</span>
+            <strong>${members.length}</strong>
+          </div>
+          <div class="team-level-members">
+            ${members.map(renderMemberCard).join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
 
   const syncWarning = profilesSyncError
     ? `<div class="empty warning-box">${escapeHtml(profilesSyncError)}</div>`
     : "";
 
-  els.teamTree.innerHTML = syncWarning + (roots.length
-    ? roots.map(renderNode).join("")
+  els.teamTree.innerHTML = syncWarning + (hierarchySections
+    ? `<div class="team-hierarchy-board">${hierarchySections}</div>`
     : `<div class="empty">No visible team members.</div>`);
 
   const controls = [
@@ -2305,12 +2592,28 @@ async function approveSignupRequest(requestId) {
   request.requestedRole = role;
   request.reportsTo = reportsTo;
 
-  state.notifications.push({
-    id: uid("note"),
+  await addNotification({
     type: "User approved",
     message: `${request.name} approved as ${roleLabels[role] || role}.`,
-    read: false,
-    createdAt: new Date().toISOString()
+    targetProfileId: profile.id,
+    metaKey: `user-approved-${profile.id}`
+  }, {
+    browser: true
+  });
+
+  await sendRecipientEmail({
+    recipient: profile,
+    subject: "Your Operations Desk access is approved",
+    body: [
+      `Hi ${profile.name},`,
+      "",
+      `Your account has been approved as ${roleLabels[role] || role}.`,
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `user-approved-${profile.id}`,
+    silent: true
   });
 
   if (!(await saveApprovalRequestToSupabase(request))) {
@@ -2335,6 +2638,13 @@ async function denySignupRequest(requestId) {
 
   if (!request) return;
 
+  if (!confirmWarning(
+    `Deny ${request.name || "this signup request"}?`,
+    "This blocks the user from entering the app until they submit or receive another approval."
+  )) {
+    return;
+  }
+
   const previousRequest = { ...request };
 
   request.status = "denied";
@@ -2347,12 +2657,27 @@ async function denySignupRequest(requestId) {
     return;
   }
 
-  state.notifications.push({
-    id: uid("note"),
+  await addNotification({
     type: "User denied",
     message: `${request.name} signup request denied.`,
-    read: false,
-    createdAt: new Date().toISOString()
+    metaKey: `user-denied-${request.id}`
+  }, {
+    browser: true
+  });
+
+  await sendRecipientEmail({
+    recipient: request,
+    subject: "Operations Desk signup request update",
+    body: [
+      `Hi ${request.name},`,
+      "",
+      "Your signup request was denied. Please contact your admin if you believe this is a mistake.",
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `user-denied-${request.id}`,
+    silent: true
   });
 
   saveState();
@@ -2385,12 +2710,25 @@ function renderDailyReports() {
   const currentReport = getReportFor(current.id, today);
   const submitPanel = document.getElementById("dailyReportSubmitPanel");
   const canSubmitReport = isReportRequiredProfile(current);
+  const canReview = canReviewReports(current);
   const selectedDate = els.reportDateFilter?.value || today;
-  const selectedRole = els.reportRoleFilter?.value || "all";
-  const selectedMember = els.reportMemberFilter?.value || "all";
+  const selectedRole = canReview ? (els.reportRoleFilter?.value || "all") : "all";
+  const selectedMember = canReview ? (els.reportMemberFilter?.value || "all") : current.id;
+  const reportPanelTitle = document.querySelector("#dailyReportList")?.closest(".panel")?.querySelector("h3");
+  const reportFilters = document.querySelector(".report-filters");
+  const reviewOnlyFilters = document.querySelectorAll(".review-only-filter");
 
   if (submitPanel) {
     submitPanel.hidden = !canSubmitReport;
+  }
+
+  reviewOnlyFilters.forEach(filter => {
+    filter.hidden = !canReview;
+  });
+  reportFilters?.classList.toggle("self-report-filters", !canReview);
+
+  if (reportPanelTitle) {
+    reportPanelTitle.textContent = canReview ? "Team reports" : "My reports";
   }
 
   if (els.reportDateFilter && !els.reportDateFilter.value) {
@@ -2422,9 +2760,11 @@ function renderDailyReports() {
   }
 
   const memberFilter = els.reportMemberFilter?.value || selectedMember;
-  const visibleProfiles = allReviewableProfiles
-    .filter(profile => selectedRole === "all" || profile.role === selectedRole)
-    .filter(profile => memberFilter === "all" || profile.id === memberFilter);
+  const visibleProfiles = canReview
+    ? allReviewableProfiles
+      .filter(profile => selectedRole === "all" || profile.role === selectedRole)
+      .filter(profile => memberFilter === "all" || profile.id === memberFilter)
+    : [current].filter(isReportRequiredProfile);
 
   const rows = visibleProfiles.map(profile => {
     const report = getReportFor(profile.id, selectedDate);
@@ -2436,9 +2776,9 @@ function renderDailyReports() {
             <h4>${escapeHtml(profile.name)}</h4>
             <span>${escapeHtml(roleLabels[profile.role] || profile.role)}</span>
           </div>
-          <button class="link-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
+          ${canReview ? `<button class="link-btn" type="button" onclick="showEmployeeProfile('${profile.id}')">
             Open profile
-          </button>
+          </button>` : ""}
         </header>
         ${report ? `
           <dl>
@@ -2457,8 +2797,10 @@ function renderDailyReports() {
   const syncWarning = dailyReportsSyncError
     ? `<div class="empty warning-box">${escapeHtml(dailyReportsSyncError)}</div>`
     : "";
-  els.missingReportBadge.textContent = `${missingCount} missing`;
-  els.dailyReportList.innerHTML = syncWarning + (rows.join("") || `<div class="empty">No EOD reports to review for these filters.</div>`);
+  els.missingReportBadge.textContent = canReview
+    ? `${missingCount} missing`
+    : (getReportFor(current.id, selectedDate) ? "Submitted" : "Not filled");
+  els.dailyReportList.innerHTML = syncWarning + (rows.join("") || `<div class="empty">${canReview ? "No EOD reports to review for these filters." : "No report found for this date."}</div>`);
 }
 
 function getVisibleNotifications() {
@@ -2475,6 +2817,7 @@ function getVisibleNotifications() {
 function renderMetrics() {
   const scopedFreelancers = getScopedFreelancers();
   const scopedTasks = getScopedTasks();
+  const scopedOperations = getScopedOperations();
 
   const unread =
     getVisibleNotifications().filter(
@@ -2482,15 +2825,15 @@ function renderMetrics() {
     ).length;
 
   const operations =
-    state.operations.length;
+    scopedOperations.length;
 
   const ongoing =
-    state.operations.filter(
+    scopedOperations.filter(
       op => op.status === "Ongoing"
     ).length;
 
   const dueSoon =
-    state.operations.filter(op => {
+    scopedOperations.filter(op => {
 
       const days =
         Math.ceil(
@@ -2504,7 +2847,7 @@ function renderMetrics() {
     }).length;
 
     const delayed =
-  state.operations.filter(op => {
+  scopedOperations.filter(op => {
 
     const days =
       Math.ceil(
@@ -2653,9 +2996,17 @@ const freelancers =
 }
 
 function deleteFreelancer(id) {
+  const person = findFreelancer(id);
+  const taskCount = state.tasks.filter(task => task.freelancerId === id).length;
 
-  if (!confirm("Delete freelancer?"))
+  if (!confirmWarning(
+    `Delete ${person?.name || "this freelancer"}?`,
+    taskCount
+      ? `This will remove the freelancer profile. ${taskCount} existing assignment(s) will show as unassigned.`
+      : "This will permanently remove the freelancer profile from this app."
+  )) {
     return;
+  }
 
   state.freelancers =
     state.freelancers.filter(
@@ -2699,7 +3050,7 @@ function renderOperationSelectors() {
     return;
 
   const options =
-    state.operations.map(op =>
+    getScopedOperations().map(op =>
 
       `<option value="${op.id}">
         ${escapeHtml(op.batchName)}
@@ -2738,9 +3089,14 @@ function renderTasks() {
 }
 
 function deleteTask(id) {
+  const task = state.tasks.find(item => item.id === id);
 
-  if (!confirm("Delete task?"))
+  if (!confirmWarning(
+    `Delete ${task ? getTaskLabel(task) : "this task"}?`,
+    "This permanently removes the assignment, its workflow status, and payment tracking from this app."
+  )) {
     return;
+  }
 
   state.tasks =
     state.tasks.filter(
@@ -2919,10 +3275,6 @@ function showEmployeeProfile(profileId) {
   const childProfiles = state.profiles.filter(item => item.reportsTo === profile.id);
   const ownFreelancers = state.freelancers.filter(person => person.ownerId === profile.id);
   const ownTasks = state.tasks.filter(task => ownFreelancers.some(person => person.id === task.freelancerId));
-  const canRemoveMember =
-    getCurrentProfile().role === "admin" &&
-    profile.role !== "admin" &&
-    profile.id !== getCurrentProfile().id;
   const canPingReport =
     canManageProfile(profile) &&
     isReportRequiredProfile(profile) &&
@@ -2941,16 +3293,12 @@ function showEmployeeProfile(profileId) {
         <h3>Details</h3>
         <dl>
           <dt>Email</dt><dd>${escapeHtml(profile.email || "")}</dd>
+          <dt>WhatsApp</dt><dd>${escapeHtml(profile.mobile || "-")}</dd>
           <dt>Reports to</dt><dd>${escapeHtml(getProfileName(profile.reportsTo))}</dd>
           <dt>Direct reports</dt><dd>${childProfiles.length}</dd>
           <dt>Own freelancers</dt><dd>${ownFreelancers.length}</dd>
           <dt>Own assignments</dt><dd>${ownTasks.length}</dd>
         </dl>
-        ${canRemoveMember ? `
-          <button class="danger-btn remove-member-btn" type="button" onclick="removeApprovedMember('${profile.id}')">
-            Remove member
-          </button>
-        ` : ""}
       </article>
       <article>
         <h3>Today</h3>
@@ -3038,7 +3386,10 @@ async function removeApprovedMember(profileId) {
     return;
   }
 
-  if (!confirm(`Remove ${profile.name} from approved members?`)) {
+  if (!confirmWarning(
+    `Remove ${profile.name} from approved members?`,
+    "This revokes app access, removes their daily reports, and reassigns their freelancers to their manager or admin."
+  )) {
     return;
   }
 
@@ -3067,12 +3418,12 @@ async function removeApprovedMember(profileId) {
       saveApprovalRequestToSupabase(request);
     });
 
-  state.notifications.push({
-    id: uid("note"),
+  await addNotification({
     type: "Member removed",
     message: `${profile.name} removed from approved members.`,
-    read: false,
-    createdAt: new Date().toISOString()
+    metaKey: `member-removed-${profile.id}-${Date.now()}`
+  }, {
+    browser: true
   });
 
   saveState();
@@ -3235,25 +3586,41 @@ async function updateTask(taskId, patch) {
   Object.assign(task, patch);
 
   if (patch.status === "Completed" && task.paymentStatus !== "Paid") {
-    state.notifications.push({
-      id: uid("note"),
+    await addNotification({
       type: "Payment pending",
       message: `${getTaskLabel(task)} is complete and ready for payment review.`,
       taskId: task.id,
       freelancerId: task.freelancerId,
-      read: false,
-      createdAt: new Date().toISOString()
+      metaKey: `task-completed-payment-pending-${task.id}`
+    }, {
+      browser: true
     });
 
     await sendTaskCompletionEmail(task);
+    await sendTaskCompletionWhatsApp(task);
   }
 
   if (
     patch.paymentStatus &&
     patch.paymentStatus !== previousTask.paymentStatus
   ) {
+    const paymentMessage =
+      task.paymentStatus === "Paid"
+        ? `${getTaskLabel(task)} payment has been completed.`
+        : `${getTaskLabel(task)} payment status changed to ${task.paymentStatus}.`;
+
+    await addNotification({
+      type: task.paymentStatus === "Paid" ? "Payment completed" : "Payment updated",
+      message: paymentMessage,
+      taskId: task.id,
+      freelancerId: task.freelancerId,
+      metaKey: `payment-${task.id}-${task.paymentStatus}`
+    }, {
+      browser: true
+    });
 
     await sendPaymentStatusEmail(task);
+    await sendPaymentStatusWhatsApp(task);
 
   }
 
@@ -3273,16 +3640,16 @@ function prepareTaskModal() {
   renderOperationSelectors();
 }
 
-function createAssignmentNotification(task) {
+async function createAssignmentNotification(task) {
   const person = findFreelancer(task.freelancerId);
-  state.notifications.push({
-    id: uid("note"),
+  await addNotification({
     type: "Task assigned",
     message: `${getTaskLabel(task)} assigned to ${person?.name || "a freelancer"}.`,
     taskId: task.id,
     freelancerId: task.freelancerId,
-    read: false,
-    createdAt: new Date().toISOString()
+    metaKey: `task-assigned-${task.id}`
+  }, {
+    browser: true
   });
 }
 
@@ -3334,14 +3701,32 @@ function markEmailSent(eventKey) {
   saveState();
 }
 
-async function sendFreelancerEmail({
-  freelancer,
+function getAutomationEventKey(channel, eventKey) {
+  return eventKey ? `${channel}:${eventKey}` : "";
+}
+
+function getRecipientName(recipient) {
+  return recipient?.name || recipient?.email || "there";
+}
+
+function getRecipientEmail(recipient) {
+  return String(recipient?.email || "").trim();
+}
+
+function getRecipientMobile(recipient) {
+  return String(recipient?.mobile || recipient?.phone || recipient?.whatsapp || "").trim();
+}
+
+async function sendRecipientEmail({
+  recipient,
   subject,
   body,
   eventKey,
   silent = false
 }) {
-  if (eventKey && wasEmailSent(eventKey)) {
+  const automationKey = getAutomationEventKey("email", eventKey);
+
+  if (automationKey && wasEmailSent(automationKey)) {
     return true;
   }
 
@@ -3353,9 +3738,11 @@ async function sendFreelancerEmail({
     return false;
   }
 
-  if (!freelancer || !isValidRecipient(freelancer.email)) {
+  const to = getRecipientEmail(recipient);
+
+  if (!recipient || !isValidRecipient(to)) {
     if (!silent) {
-      toast("Freelancer email is missing or invalid.");
+      toast("Recipient email is missing or invalid.");
     }
 
     return false;
@@ -3367,11 +3754,11 @@ async function sendFreelancerEmail({
         EMAIL_FUNCTION_NAME,
         {
           body: {
-            to: freelancer.email,
+            to,
             subject,
             text: body,
             html: buildHtmlEmail(body),
-            replyTo: state.emailSettings.senderEmail,
+            replyTo: getCurrentProfile().email || state.emailSettings.senderEmail,
             senderName: state.emailSettings.senderName
           }
         }
@@ -3381,7 +3768,7 @@ async function sendFreelancerEmail({
       throw error;
     }
 
-    markEmailSent(eventKey);
+    markEmailSent(automationKey);
     return true;
 
   } catch (err) {
@@ -3389,6 +3776,73 @@ async function sendFreelancerEmail({
 
     if (!silent) {
       toast("Email could not be sent. Check Supabase function setup.");
+    }
+
+    return false;
+  }
+}
+
+async function sendFreelancerEmail(options) {
+  return sendRecipientEmail({
+    ...options,
+    recipient: options.freelancer
+  });
+}
+
+async function sendRecipientWhatsApp({
+  recipient,
+  message,
+  eventKey,
+  silent = false
+}) {
+  const automationKey = getAutomationEventKey("whatsapp", eventKey);
+
+  if (automationKey && wasEmailSent(automationKey)) {
+    return true;
+  }
+
+  if (!hasActiveSession()) {
+    if (!silent) {
+      toast("Login is required before sending WhatsApp.");
+    }
+
+    return false;
+  }
+
+  const to = normalizeWhatsAppNumber(getRecipientMobile(recipient));
+
+  if (!recipient || !to) {
+    if (!silent) {
+      toast("Recipient WhatsApp number is missing.");
+    }
+
+    return false;
+  }
+
+  try {
+    const { error } =
+      await supabaseClient.functions.invoke(
+        WHATSAPP_FUNCTION_NAME,
+        {
+          body: {
+            to,
+            text: message
+          }
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    markEmailSent(automationKey);
+    return true;
+
+  } catch (err) {
+    console.error("WhatsApp send failed", err);
+
+    if (!silent) {
+      toast("WhatsApp could not be sent. Check Supabase function setup.");
     }
 
     return false;
@@ -3412,6 +3866,17 @@ async function sendTaskAssignmentEmail(task) {
     subject,
     body,
     eventKey: `task-assigned-${task.id}`
+  });
+}
+
+async function sendTaskAssignmentWhatsApp(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendRecipientWhatsApp({
+    recipient: person,
+    message: buildTaskAssignmentMessage(task),
+    eventKey: `task-assigned-${task.id}`,
+    silent: true
   });
 }
 
@@ -3470,6 +3935,26 @@ async function sendTaskUpdateEmail(task, previousTask) {
   });
 }
 
+async function sendTaskUpdateWhatsApp(task, previousTask) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendRecipientWhatsApp({
+    recipient: person,
+    message: [
+      `Hi ${person?.name || ""},`,
+      "",
+      "Your assigned task has been updated.",
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `task-updated-${task.id}-${Date.now()}`,
+    silent: true
+  });
+}
+
 async function sendTaskCompletionEmail(task) {
   const person = findFreelancer(task.freelancerId);
 
@@ -3490,6 +3975,26 @@ async function sendTaskCompletionEmail(task) {
   });
 }
 
+async function sendTaskCompletionWhatsApp(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendRecipientWhatsApp({
+    recipient: person,
+    message: [
+      `Hi ${person?.name || ""},`,
+      "",
+      "Your task has been marked completed. Payment review is now pending.",
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `task-completed-${task.id}`,
+    silent: true
+  });
+}
+
 async function sendPaymentStatusEmail(task) {
   const person = findFreelancer(task.freelancerId);
 
@@ -3507,6 +4012,26 @@ async function sendPaymentStatusEmail(task) {
       state.emailSettings.senderName
     ].join("\n"),
     eventKey: `payment-${task.id}-${task.paymentStatus}`
+  });
+}
+
+async function sendPaymentStatusWhatsApp(task) {
+  const person = findFreelancer(task.freelancerId);
+
+  return sendRecipientWhatsApp({
+    recipient: person,
+    message: [
+      `Hi ${person?.name || ""},`,
+      "",
+      `Payment status for your task is now: ${task.paymentStatus}.`,
+      "",
+      buildTaskDetails(task),
+      "",
+      `Thanks,`,
+      state.emailSettings.senderName
+    ].join("\n"),
+    eventKey: `payment-${task.id}-${task.paymentStatus}`,
+    silent: true
   });
 }
 
@@ -3584,6 +4109,23 @@ async function queueDeadlineEmails() {
         eventKey: `${eventType}-${task.id}-${task.deadlineDate}`,
         silent: true
       });
+
+      await sendRecipientWhatsApp({
+        recipient: person,
+        message: body,
+        eventKey: `${eventType}-${task.id}-${task.deadlineDate}`,
+        silent: true
+      });
+
+      await addNotification({
+        type: daysLeft < 0 ? "Deadline overdue" : "Deadline reminder",
+        message: `${getTaskLabel(task)} ${daysLeft < 0 ? "is overdue" : daysLeft === 0 ? "is due today" : "is due tomorrow"}.`,
+        taskId: task.id,
+        freelancerId: task.freelancerId,
+        metaKey: `${eventType}-notification-${task.id}-${task.deadlineDate}`
+      }, {
+        browser: true
+      });
     }
 
   } finally {
@@ -3638,6 +4180,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function confirmWarning(title, message) {
+  return window.confirm(`⚠️ ${title}\n\n${message}`);
 }
 
 function toast(message) {
@@ -3704,9 +4250,10 @@ function renderOperations() {
 
   if (!grid) return;
   const scopedTasks = getScopedTasks();
+  const scopedOperations = getScopedOperations();
 
   grid.innerHTML =
-    state.operations.map(op => {
+    scopedOperations.map(op => {
 
       const assigned =
         scopedTasks
@@ -3872,6 +4419,8 @@ function getExportSheets() {
       id: profile.id,
       name: profile.name,
       email: profile.email,
+      mobile: profile.mobile || "",
+      avatarUrl: profile.avatarUrl || "",
       role: profile.role,
       reportsTo: profile.reportsTo,
       reportsToName: getProfileName(profile.reportsTo),
@@ -3998,6 +4547,8 @@ async function importRowsByType(type, rows) {
       if (!email && !name) continue;
 
       const reportsToValue = getImportValue(row, ["reportsTo", "Reports To", "reportsToName"]);
+      const mobile = getImportValue(row, ["mobile", "Mobile", "Phone", "WhatsApp", "whatsapp"]);
+      const avatarUrl = getImportValue(row, ["avatarUrl", "avatar_url", "Profile Photo", "Photo"]);
       const reportsToProfile = state.profiles.find(profile =>
         profile.id === reportsToValue ||
         sameEmail(profile.email, reportsToValue) ||
@@ -4007,6 +4558,8 @@ async function importRowsByType(type, rows) {
         id: getImportValue(row, ["id", "ID"]) || uid("user"),
         name: name || email.split("@")[0],
         email,
+        mobile,
+        avatarUrl,
         role: getImportValue(row, ["role", "Role"]) || "executive",
         reportsTo: reportsToProfile?.id || reportsToValue || "",
         status: getImportValue(row, ["status", "Status"]) || "active"

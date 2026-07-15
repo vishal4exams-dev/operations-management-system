@@ -65,6 +65,7 @@
           <button class="nav-btn" data-view="reports" type="button"><span>📝</span><span class="nav-label">Daily Reports</span></button>
           <button class="nav-btn" data-view="payments" type="button"><span>💰</span><span class="nav-label">Payments</span></button>
           <button class="nav-btn" data-view="notifications" type="button"><span>🔔</span><span class="nav-label">Notifications</span></button>
+          <button class="nav-btn" data-view="profile" type="button"><span>👤</span><span class="nav-label">Profile</span></button>
         </nav>
         <div class="sidebar-note">
           <span>Tip</span>
@@ -81,9 +82,9 @@
           <div class="top-actions">
             <button class="ghost-btn" id="installBtn" hidden> Install App</button>
             <span class="welcome-user" id="welcomeUser">Welcome</span>
-            <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
-            <button class="ghost-btn" id="exportDataBtn"> Export Data</button>
-            <button class="ghost-btn" id="importDataBtn"> Import Data</button>
+            <button class="ghost-btn action-icon import-action" id="importDataBtn" type="button" title="Import Data" aria-label="Import Data">⬆</button>
+            <button class="ghost-btn action-icon export-action" id="exportDataBtn" type="button" title="Export Data" aria-label="Export Data">⬇</button>
+            <button class="ghost-btn action-icon logout-action" id="logoutBtn" type="button" title="Logout" aria-label="Logout">⏻</button>
             <input type="file" id="importFile" accept=".json,.xlsx,.xls,.csv" hidden>
           </div>
         </header>
@@ -178,18 +179,52 @@
               </div>
               <div class="report-filters">
                 <label>Date<input id="reportDateFilter" type="date"></label>
-                <label>Role
+                <label class="review-only-filter">Role
                   <select id="reportRoleFilter">
                     <option value="all">All roles</option>
                     <option value="associate">Associate</option>
                     <option value="executive">Executive</option>
                   </select>
                 </label>
-                <label>Member<select id="reportMemberFilter"></select></label>
+                <label class="review-only-filter">Member<select id="reportMemberFilter"></select></label>
               </div>
               <div id="dailyReportList" class="report-list"></div>
             </section>
           </div>
+        </section>
+
+        <section class="view" id="profile-view" aria-labelledby="profile-heading">
+          <div class="section-head">
+            <div>
+              <h2 id="profile-heading" style="font-size:xx-large;">Profile</h2>
+              <p class="section-subtitle" style="margin-top: 20px;">View your account details and update your photo or WhatsApp number.</p>
+            </div>
+          </div>
+          <section class="panel profile-settings-panel">
+            <form id="profileSettingsForm" class="profile-settings-form">
+              <div class="profile-photo-editor">
+                <div class="profile-photo-preview" id="profilePhotoPreview" aria-hidden="true"></div>
+                <div>
+                  <h3 id="profileSettingsName">Your profile</h3>
+                  <p id="profileSettingsRole" class="section-subtitle"></p>
+                  <div class="profile-photo-actions">
+                    <label class="ghost-btn profile-upload-btn" for="profilePhotoInput">Choose photo</label>
+                    <input id="profilePhotoInput" name="photo" type="file" accept="image/*" hidden>
+                    <button class="ghost-btn" id="removeProfilePhotoBtn" type="button">Remove photo</button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Name<input id="profileNameInput" name="name" required></label>
+                <label>Email<input id="profileEmailInput" name="email" type="email" readonly></label>
+                <label>WhatsApp number<input id="profileMobileInput" name="mobile" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10 digits only, e.g. 9876543210" title="Enter exactly 10 digits"></label>
+                <label>Role<input id="profileRoleInput" name="role" readonly></label>
+              </div>
+              <menu>
+                <button class="primary-btn" type="submit">Save profile</button>
+              </menu>
+            </form>
+          </section>
         </section>
 
         <section class="view"
@@ -549,6 +584,7 @@ Batch Name
           <input type="hidden" name="id" id="employeeId">
           <label>Name<input name="name" required placeholder="Employee name"></label>
           <label>Email<input name="email" required type="email" placeholder="employee@yourdomain.com"></label>
+          <label>WhatsApp number<input name="mobile" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10 digits only, e.g. 9876543210" title="Enter exactly 10 digits"></label>
           <label>Role
             <select name="role" id="employeeRoleSelect" required>
               <option value="manager">Manager</option>
@@ -565,7 +601,7 @@ Batch Name
       </form>
     </dialog>
 
-    <dialog id="employeeProfileModal">
+    <dialog id="employeeProfileModal" class="profile-dialog">
       <div class="modal-form profile-modal">
         <div class="modal-head">
           <h2 id="employeeProfileTitle">Employee profile</h2>
@@ -575,7 +611,7 @@ Batch Name
       </div>
     </dialog>
 
-    <dialog id="freelancerProfileModal">
+    <dialog id="freelancerProfileModal" class="profile-dialog">
       <div class="modal-form profile-modal">
         <div class="modal-head">
           <h2 id="freelancerProfileTitle">Freelancer profile</h2>

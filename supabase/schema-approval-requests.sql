@@ -37,6 +37,8 @@ create table if not exists public.profiles (
   id text primary key,
   name text not null,
   email text not null,
+  mobile text,
+  avatar_url text,
   role text not null
     check (role in ('admin', 'manager', 'associate', 'executive')),
   reports_to text,
@@ -49,6 +51,8 @@ create table if not exists public.profiles (
 alter table public.profiles
   add column if not exists name text,
   add column if not exists email text,
+  add column if not exists mobile text,
+  add column if not exists avatar_url text,
   add column if not exists role text,
   add column if not exists reports_to text,
   add column if not exists status text not null default 'active',
