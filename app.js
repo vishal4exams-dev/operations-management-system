@@ -507,6 +507,7 @@ document.getElementById("openEmployeeModalBtn")?.addEventListener("click", () =>
 
   document.getElementById("employeeForm").reset();
   document.getElementById("employeeId").value = "";
+  document.querySelector("#employeeModal .modal-head h2").textContent = "Add employee";
   renderEmployeeReportsToSelect();
   document.getElementById("employeeModal").showModal();
 });
@@ -618,6 +619,18 @@ document
   const data = Object.fromEntries(
     new FormData(event.currentTarget)
   );
+  data.email = String(data.email || "").trim();
+  data.mobile = String(data.mobile || "").trim();
+
+  if (!isValidEmailAddress(data.email)) {
+    toast("Enter a valid freelancer email with a domain.");
+    return;
+  }
+
+  if (!isTenDigitMobile(data.mobile)) {
+    toast("Freelancer mobile number must be exactly 10 digits.");
+    return;
+  }
 
   if (data.id) {
     const index = state.freelancers.findIndex(
@@ -717,7 +730,7 @@ document.getElementById("profilePhotoInput")?.addEventListener("change", async (
   renderProfileSettings();
 });
 
-document.querySelectorAll("#profileMobileInput, #employeeForm [name='mobile']").forEach(input => {
+document.querySelectorAll("#profileMobileInput, #employeeForm [name='mobile'], #freelancerForm [name='mobile']").forEach(input => {
   input.addEventListener("input", () => {
     input.value = normalizeTenDigitMobile(input.value);
   });
@@ -848,6 +861,7 @@ document.getElementById("taskForm").addEventListener("submit", async (event) => 
       await addNotification({
         type: "Task updated",
         message: `${getTaskLabel(state.tasks[index])} was updated.`,
+        targetProfileId: getTaskNotificationTargetProfile(state.tasks[index]).id,
         taskId: state.tasks[index].id,
         freelancerId: state.tasks[index].freelancerId,
         metaKey: `task-updated-${state.tasks[index].id}-${Date.now()}`
@@ -1584,11 +1598,11 @@ async function addNotification(note, { browser = false } = {}) {
 function canCurrentProfileSeeNotification(note) {
   const current = getCurrentProfile();
 
-  if (!note.targetProfileId) return true;
-  if (note.targetProfileId === current.id) return true;
-  if (current.role === "admin") return true;
+  if (note.targetProfileId) {
+    return note.targetProfileId === current.id;
+  }
 
-  return getDescendantProfileIds(current.id).includes(note.targetProfileId);
+  return current.role === "admin" && ["Signup approval", "Member removed"].includes(note.type);
 }
 
 async function ensureBrowserNotificationPermission() {
@@ -1647,6 +1661,35 @@ function getManagerForProfile(profile) {
   return state.profiles.find(item => item.id === profile.reportsTo) ||
     state.profiles.find(item => item.role === "admin") ||
     null;
+}
+
+function getActiveAdminProfiles() {
+  return state.profiles.filter(profile =>
+    profile.role === "admin" &&
+    (!profile.status || profile.status === "active")
+  );
+}
+
+async function addNotificationForProfiles(profiles, note, options = {}) {
+  const uniqueProfiles = [...new Map(
+    profiles
+      .filter(Boolean)
+      .map(profile => [profile.id, profile])
+  ).values()];
+
+  for (const profile of uniqueProfiles) {
+    await addNotification({
+      ...note,
+      targetProfileId: profile.id,
+      metaKey: note.metaKey ? `${note.metaKey}-${profile.id}` : undefined
+    }, options);
+  }
+}
+
+function getTaskNotificationTargetProfile(task) {
+  const person = findFreelancer(task?.freelancerId);
+  const ownerId = person?.ownerId || task?.ownerId || getCurrentProfile().id;
+  return state.profiles.find(profile => profile.id === ownerId) || getCurrentProfile();
 }
 
 async function notifyReportSubmitted(report, profile = getCurrentProfile()) {
@@ -1948,7 +1991,7 @@ async function createApprovalRequest({ name, email, authUserId = "" }) {
 
   state.approvalRequests.push(request);
 
-  await addNotification({
+  await addNotificationForProfiles(getActiveAdminProfiles(), {
     type: "Signup approval",
     message: `${request.name} requested access and needs role assignment.`,
     metaKey: `signup-approval-${request.id}`
@@ -2041,6 +2084,10 @@ function isTenDigitMobile(value) {
   return /^\d{10}$/.test(String(value || ""));
 }
 
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
 function setView(view) {
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   els.views.forEach((section) => section.classList.toggle("active", section.id === `${view}-view`));
@@ -2085,12 +2132,8 @@ function getDescendantProfileIds(profileId) {
 function getVisibleProfileIds() {
   const profile = getCurrentProfile();
 
-  if (profile.role === "admin") {
+  if (["admin", "manager"].includes(profile.role)) {
     return state.profiles.map(item => item.id);
-  }
-
-  if (profile.role === "manager") {
-    return getDescendantProfileIds(profile.id);
   }
 
   if (["associate", "executive"].includes(profile.role)) {
@@ -2136,7 +2179,7 @@ function getScopedTasks() {
 function getScopedOperations() {
   const current = getCurrentProfile();
 
-  if (current.role === "admin") {
+  if (["admin", "manager"].includes(current.role)) {
     return state.operations;
   }
 
@@ -2391,9 +2434,14 @@ function renderTeam() {
           <span class="team-status">${reportStatus.label}</span>
         </div>
         ${canRemoveMember ? `
-          <button class="danger-btn team-remove-btn" type="button" onclick="removeApprovedMember('${profile.id}')">
-            Remove member
-          </button>
+          <div class="team-admin-actions">
+            <button class="ghost-btn team-edit-btn" type="button" onclick="editApprovedMember('${profile.id}')">
+              Edit reporting
+            </button>
+            <button class="danger-btn team-remove-btn" type="button" onclick="removeApprovedMember('${profile.id}')">
+              Remove member
+            </button>
+          </div>
         ` : ""}
       </article>
     `;
@@ -2461,6 +2509,34 @@ function renderEmployeeReportsToSelect() {
 }
 
 document.getElementById("employeeRoleSelect")?.addEventListener("change", renderEmployeeReportsToSelect);
+
+function editApprovedMember(profileId) {
+  if (getCurrentProfile().role !== "admin") {
+    toast("Only admin can edit reporting heads.");
+    return;
+  }
+
+  const profile = state.profiles.find(item => item.id === profileId);
+
+  if (!profile || profile.role === "admin") {
+    toast("Admin profile cannot be edited here.");
+    return;
+  }
+
+  const form = document.getElementById("employeeForm");
+  if (!form) return;
+
+  form.reset();
+  document.getElementById("employeeId").value = profile.id;
+  form.elements.name.value = profile.name || "";
+  form.elements.email.value = profile.email || "";
+  form.elements.mobile.value = profile.mobile || "";
+  form.elements.role.value = profile.role || "executive";
+  renderEmployeeReportsToSelect();
+  form.elements.reportsTo.value = profile.reportsTo || "";
+  document.querySelector("#employeeModal .modal-head h2").textContent = "Edit employee";
+  document.getElementById("employeeModal").showModal();
+}
 
 function renderApprovalReportsToSelect(requestId) {
   const roleSelect = document.getElementById(`approvalRole-${requestId}`);
@@ -2660,6 +2736,7 @@ async function denySignupRequest(requestId) {
   await addNotification({
     type: "User denied",
     message: `${request.name} signup request denied.`,
+    targetProfileId: getCurrentProfile().id,
     metaKey: `user-denied-${request.id}`
   }, {
     browser: true
@@ -2805,11 +2882,8 @@ function renderDailyReports() {
 
 function getVisibleNotifications() {
   const visibleFreelancerIds = new Set(getScopedFreelancers().map(person => person.id));
-  const adminOnlyTypes = new Set(["Signup approval", "User approved", "User denied", "Member removed"]);
-  const isAdmin = getCurrentProfile().role === "admin";
 
   return state.notifications
-    .filter(note => !adminOnlyTypes.has(note.type) || isAdmin)
     .filter(canCurrentProfileSeeNotification)
     .filter(note => !note.freelancerId || visibleFreelancerIds.has(note.freelancerId));
 }
@@ -2863,7 +2937,7 @@ function renderMetrics() {
 
   const items = [
 
-["Operations", operations],
+["Tasks", operations],
 
 ["Ongoing", ongoing],
 
@@ -3421,6 +3495,7 @@ async function removeApprovedMember(profileId) {
   await addNotification({
     type: "Member removed",
     message: `${profile.name} removed from approved members.`,
+    targetProfileId: getCurrentProfile().id,
     metaKey: `member-removed-${profile.id}-${Date.now()}`
   }, {
     browser: true
@@ -3589,6 +3664,7 @@ async function updateTask(taskId, patch) {
     await addNotification({
       type: "Payment pending",
       message: `${getTaskLabel(task)} is complete and ready for payment review.`,
+      targetProfileId: getTaskNotificationTargetProfile(task).id,
       taskId: task.id,
       freelancerId: task.freelancerId,
       metaKey: `task-completed-payment-pending-${task.id}`
@@ -3612,6 +3688,7 @@ async function updateTask(taskId, patch) {
     await addNotification({
       type: task.paymentStatus === "Paid" ? "Payment completed" : "Payment updated",
       message: paymentMessage,
+      targetProfileId: getTaskNotificationTargetProfile(task).id,
       taskId: task.id,
       freelancerId: task.freelancerId,
       metaKey: `payment-${task.id}-${task.paymentStatus}`
@@ -3645,6 +3722,7 @@ async function createAssignmentNotification(task) {
   await addNotification({
     type: "Task assigned",
     message: `${getTaskLabel(task)} assigned to ${person?.name || "a freelancer"}.`,
+    targetProfileId: getTaskNotificationTargetProfile(task).id,
     taskId: task.id,
     freelancerId: task.freelancerId,
     metaKey: `task-assigned-${task.id}`
@@ -4120,6 +4198,7 @@ async function queueDeadlineEmails() {
       await addNotification({
         type: daysLeft < 0 ? "Deadline overdue" : "Deadline reminder",
         message: `${getTaskLabel(task)} ${daysLeft < 0 ? "is overdue" : daysLeft === 0 ? "is due today" : "is due tomorrow"}.`,
+        targetProfileId: getTaskNotificationTargetProfile(task).id,
         taskId: task.id,
         freelancerId: task.freelancerId,
         metaKey: `${eventType}-notification-${task.id}-${task.deadlineDate}`

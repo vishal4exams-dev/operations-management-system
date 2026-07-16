@@ -59,7 +59,7 @@
         <nav class="nav" aria-label="Main navigation">
           <button class="nav-btn active" data-view="dashboard"><span>🏠</span><span class="nav-label">Dashboard</span></button>
           <button class="nav-btn" data-view="freelancers" type="button"><span>👥</span><span class="nav-label">Freelancers</span></button>
-          <button class="nav-btn" data-view="operations" type="button"><span>⚙️</span><span class="nav-label">Operations</span></button>
+          <button class="nav-btn" data-view="operations" type="button"><span>⚙️</span><span class="nav-label">Tasks</span></button>
           <button class="nav-btn" data-view="tasks" type="button"><span>📋</span><span class="nav-label">Assignments</span></button>
           <button class="nav-btn" data-view="team" type="button"><span>🧭</span><span class="nav-label">Team</span></button>
           <button class="nav-btn" data-view="reports" type="button"><span>📝</span><span class="nav-label">Daily Reports</span></button>
@@ -70,6 +70,7 @@
         <div class="sidebar-note">
           <span>Tip</span>
           <p>Assigning a task creates a notification and opens a ready-to-send email draft.</p>
+          <p>© 2026 Vishal.</p>
         </div>
       </aside>
 
@@ -77,7 +78,7 @@
         <header>
           <div>
             <h1>Operations Management System</h1>
-            <p>Track people, tasks, workflow, payment status, and assignment messages in one place.</p>
+            <p>Keep track of team, tasks, workflow, daily report, and payment at one place.</p>
           </div>
           <div class="top-actions">
             <button class="ghost-btn" id="installBtn" hidden> Install App</button>
@@ -197,7 +198,7 @@
           <div class="section-head">
             <div>
               <h2 id="profile-heading" style="font-size:xx-large;">Profile</h2>
-              <p class="section-subtitle" style="margin-top: 20px;">View your account details and update your photo or WhatsApp number.</p>
+              <p class="section-subtitle">View your account details and update your photo or WhatsApp number.</p>
             </div>
           </div>
           <section class="panel profile-settings-panel">
@@ -232,13 +233,13 @@
 
   <div class="section-head">
     <h2 style="font-size:xx-large;">
-      Operations
+      Tasks
     </h2>
 
     <button class="primary-btn"
             id="openOperationModalBtn"
             type="button">
-      + Add Operation
+      + Add task
     </button>
   </div>
 
@@ -390,7 +391,7 @@
       id="operationForm">
 
 <div class="modal-head">
-<h2>Add Operation</h2>
+<h2>Add Task</h2>
 </div>
 
 <div class="form-grid">
@@ -425,7 +426,11 @@ Language
 
 <label>
 Volume
-<input name="volume"
+<input name="volume" 
+       type="number"
+       name="volume"
+       min="0"
+       step="1"
        required>
 </label>
 
@@ -480,7 +485,7 @@ Cancel
 
 <button type="submit"
         class="primary-btn">
-Save Operation
+Save Task
 </button>
 </menu>
 
@@ -488,7 +493,7 @@ Save Operation
 
 </dialog>
 
-    <dialog id="freelancerModal">
+    <dialog id="freelancerModal" class="form-dialog">
       <form method="dialog" class="modal-form" id="freelancerForm">
         <div class="modal-head">
           <h2>Add freelancer</h2>
@@ -500,8 +505,8 @@ Save Operation
         <div class="form-grid">
           <input type="hidden" name="id" id="freelancerId">
           <label>Name<input name="name" required placeholder="Aarav Mehta" /></label>
-          <label>Email<input name="email" required type="email" placeholder="aarav@example.com" /></label>
-          <label>Mobile<input name="mobile" required placeholder="1234567890" /></label>
+          <label>Email<input name="email" required type="email" pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$" placeholder="name@domain.com" title="Enter a valid email with a domain, like name@domain.com" /></label>
+          <label>Mobile<input name="mobile" required inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10 digits only, e.g. 9876543210" title="Enter exactly 10 digits" /></label>
           <label>Owner<select name="ownerId" id="freelancerOwnerSelect" required></select></label>
           <label>Role<input name="role" required placeholder="UI Designer" /></label>
           <label>State<input name="state" required placeholder="Maharashtra" /></label>
